@@ -1,0 +1,43 @@
+# ╔══════════════════════════════════════════╗
+# ║   🐳  D O C K E R  C O M P O S E        ║
+# ╚══════════════════════════════════════════╝
+version: "3.9"
+
+services:
+  bot:
+    build: .
+    container_name: serena_dl_bot
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data          # persistent database
+      - ./cookies:/app/cookies    # cookie files
+      - ./downloads:/tmp/downloads
+    environment:
+      # ── REQUIRED ──
+      - BOT_TOKEN=${BOT_TOKEN}
+      - API_ID=${API_ID}
+      - API_HASH=${API_HASH}
+      # ── OWNER ──
+      - OWNER_IDS=${OWNER_IDS:-1598576202}
+      - OWNER_USERNAME=${OWNER_USERNAME:-@Xioqui_Xan}
+      - OWNER_USERNAME2=${OWNER_USERNAME2:-@TechnicalSerena}
+      # ── CHANNELS ──
+      - FORCE_SUB_CHANNEL=${FORCE_SUB_CHANNEL:-https://t.me/serenaunzipbot}
+      - FORCE_SUB_CHANNEL_ID=${FORCE_SUB_CHANNEL_ID:-@serenaunzipbot}
+      - LOG_CHANNEL=${LOG_CHANNEL:-}
+      # ── OPTIONAL MEDIA ──
+      - START_PIC=${START_PIC:-}
+      # ── COOKIE PATHS ──
+      - YT_COOKIES_PATH=/app/cookies/youtube.txt
+      - INSTAGRAM_COOKIES_PATH=/app/cookies/instagram.txt
+      - TERABOX_COOKIES_PATH=/app/cookies/terabox.txt
+      # ── SETTINGS ──
+      - PORT=8080
+      - DATABASE_PATH=/app/data/bot.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
