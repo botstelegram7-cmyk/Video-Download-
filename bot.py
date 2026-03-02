@@ -1,30 +1,21 @@
 """
 ╔═══════════════════════════════════════════════════╗
 ║   ⋆｡° ✮  SERENA DOWNLOADER BOT  ✮ °｡⋆           ║
-║   -ˏˋ⋆  U L T I M A T E  D O W N L O A D E R    ║
-║   Owner   :  @Xioqui_Xan                         ║
-║   Support :  @TechnicalSerena                     ║
+║   Owner: @Xioqui_Xan  |  Support: @TechnicalSerena║
 ╚═══════════════════════════════════════════════════╝
 """
 import asyncio, logging, datetime, os, sys
 
-# ── Ensure /app is on path so all modules resolve correctly ───────────────────
-sys.path.insert(0, "/app")
-
-# ── Flask BEFORE asyncio.run() to avoid event loop conflicts ──────────────────
+# ── Flask BEFORE asyncio.run() — avoids event loop conflict ──────────────────
 from web.app import start_flask_thread
 start_flask_thread()
 
 from pyrogram import idle
 from config import Config
-from client import app          # shared Client instance
+from client import app
 import database as db
 from queue_manager import queue_manager
-
-# ── Import handlers so @app.on_message decorators register NOW ────────────────
-import plugins.start            # noqa
-import plugins.download         # noqa
-import plugins.admin            # noqa
+import handlers  # noqa — registers all @app.on_message decorators
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,7 +24,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── Cookie helper: paste Netscape text directly in Render env var ─────────────
+# ── Cookie helper: paste Netscape text in Render env vars ────────────────────
 def _resolve_cookie(env_key: str, default_path: str) -> str:
     raw = os.environ.get(env_key, "")
     if raw and ("\t" in raw or "# Netscape" in raw):
@@ -51,7 +42,7 @@ Config.YT_COOKIES_PATH        = _resolve_cookie("YT_COOKIES",        Config.YT_C
 Config.INSTAGRAM_COOKIES_PATH = _resolve_cookie("INSTAGRAM_COOKIES", Config.INSTAGRAM_COOKIES_PATH)
 Config.TERABOX_COOKIES_PATH   = _resolve_cookie("TERABOX_COOKIES",   Config.TERABOX_COOKIES_PATH)
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Main ─────────────────────────────────────────────────────────────────────
 async def main():
     if not Config.validate():
         logger.error("❌ Invalid config — check BOT_TOKEN / API_ID / API_HASH")
@@ -70,14 +61,11 @@ async def main():
 
         if Config.LOG_CHANNEL:
             try:
-                await app.send_message(
-                    Config.LOG_CHANNEL,
-                    f"»»──── 🤖 Bot Started ────««\n\n"
+                await app.send_message(Config.LOG_CHANNEL,
                     f"🤖 @{me.username} is **online**!\n"
-                    f"🕐 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                )
+                    f"🕐 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             except Exception as e:
-                logger.warning(f"Log channel notify failed: {e}")
+                logger.warning(f"Log channel: {e}")
 
         print("""
 ╔══════════════════════════════════════════╗
@@ -85,11 +73,10 @@ async def main():
 ║   ⋆｡° ✮  SERENA DOWNLOADER  ✮ °｡⋆      ║
 ╚══════════════════════════════════════════╝
         """)
-
         await idle()
 
     await queue_manager.stop()
-    logger.info("»»──── 🛑 Stopped ────««")
+    logger.info("🛑 Stopped.")
 
 if __name__ == "__main__":
     try:
