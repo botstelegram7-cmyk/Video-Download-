@@ -7,12 +7,38 @@
 import sys
 sys.path.insert(0, "/app")
 
-import asyncio, logging, datetime, os, time
+import asyncio, logging, datetime, os, time, threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# ── Flask BEFORE asyncio.run() ────────────────────────────────────────────────
-from web.app import start_flask_thread
-start_flask_thread()
+# ── Minimal health server — pure stdlib, ZERO asyncio involvement ─────────────
+# Flask was causing "Future attached to a different loop" because its import
+# triggers asyncio.get_event_loop() side-effects in Python 3.11.
+# HTTPServer is completely synchronous and never touches the event loop.
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = b"OK - Serena Downloader Bot is running!"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+    def log_message(self, *args):
+        pass  # silence request logs
 
+def _start_health_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    print(f"✅ Health server on port {port}")
+
+_start_health_server()  # ← before asyncio.run(), but safe — no asyncio used
+
+# ── Now safe to set up asyncio / Pyrogram ────────────────────────────────────
 from pyrogram import idle, filters
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from config import Config
@@ -80,7 +106,7 @@ async def _show_plans(target):
         f"»»──────────────────────────────««"
     )
     btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("👑 Owner", url=f"https://t.me/{Config.OWNER_USERNAME.strip('@')}"),
+        [InlineKeyboardButton("👑 Owner",   url=f"https://t.me/{Config.OWNER_USERNAME.strip('@')}"),
          InlineKeyboardButton("📞 Support", url=f"https://t.me/{Config.OWNER_USERNAME2.strip('@')}")],
         [InlineKeyboardButton("🏠 Back", callback_data="back_home")]
     ])
@@ -106,7 +132,7 @@ async def _send_help(target):
         f"»»──────────────────────────────««"
     )
     btn = InlineKeyboardMarkup([[
-        InlineKeyboardButton("🏠 Home", callback_data="back_home"),
+        InlineKeyboardButton("🏠 Home",  callback_data="back_home"),
         InlineKeyboardButton("💎 Plans", callback_data="plans_info"),
     ]])
     await target.reply(text, reply_markup=btn, quote=True)
@@ -124,11 +150,11 @@ async def start_cmd(client, message: Message):
             f"⚠️ Please **join our channel** first, then click ✅ I Joined.",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("📢 Join Channel", url=Config.FORCE_SUB_CHANNEL),
-                InlineKeyboardButton("✅ I Joined", callback_data="check_sub"),
+                InlineKeyboardButton("✅ I Joined",     callback_data="check_sub"),
             ]]), quote=True)
         return
     db_user = await db.get_user(user.id)
-    plan = (db_user or {}).get("plan", "free")
+    plan    = (db_user or {}).get("plan", "free")
     caption = (
         f"⋆｡° ✮ °｡⋆\n-ˏˋ⋆ ᴡ ᴇ ʟ ᴄ ᴏ ᴍ ᴇ ⋆ˊˎ-\n\n"
         f"✨ Hello **{user.first_name}**!\nI am **{Config.BOT_NAME}**\n\n"
@@ -142,12 +168,12 @@ async def start_cmd(client, message: Message):
         f"⋆ ｡˚ ⋆  Send any link to start!"
     )
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📖 Help", callback_data="help_main"),
-         InlineKeyboardButton("💎 Plans", callback_data="plans_info")],
+        [InlineKeyboardButton("📖 Help",     callback_data="help_main"),
+         InlineKeyboardButton("💎 Plans",    callback_data="plans_info")],
         [InlineKeyboardButton("📊 My Stats", callback_data="my_stats"),
-         InlineKeyboardButton("🔔 Updates", url=Config.FORCE_SUB_CHANNEL)],
-        [InlineKeyboardButton("👑 Owner", url=f"https://t.me/{Config.OWNER_USERNAME.strip('@')}"),
-         InlineKeyboardButton("📞 Support", url=f"https://t.me/{Config.OWNER_USERNAME2.strip('@')}")],
+         InlineKeyboardButton("🔔 Updates",  url=Config.FORCE_SUB_CHANNEL)],
+        [InlineKeyboardButton("👑 Owner",    url=f"https://t.me/{Config.OWNER_USERNAME.strip('@')}"),
+         InlineKeyboardButton("📞 Support",  url=f"https://t.me/{Config.OWNER_USERNAME2.strip('@')}")],
     ])
     try:
         if Config.START_PIC:
@@ -203,7 +229,7 @@ async def settings_cmd(client, message: Message):
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 Upgrade", callback_data="plans_info")]]),
         quote=True)
 
-# ── Callbacks ──────────────────────────────────────────────────────────────
+# ── Callbacks ─────────────────────────────────────────────────────────────────
 @app.on_callback_query(filters.regex("^check_sub$"))
 async def check_sub_cb(client, cb: CallbackQuery):
     if await is_subscribed(client, cb.from_user.id):
@@ -250,7 +276,7 @@ def _progress_cb(client, chat_id, msg_id, filename, action="dl"):
 async def _smart_upload(client, chat_id, fp, info, caption, thumb):
     ext = (info.get("ext") or os.path.splitext(fp)[1].lstrip(".")).lower()
     btn = InlineKeyboardMarkup([[
-        InlineKeyboardButton("👑 Owner", url=f"https://t.me/{Config.OWNER_USERNAME.strip('@')}"),
+        InlineKeyboardButton("👑 Owner",   url=f"https://t.me/{Config.OWNER_USERNAME.strip('@')}"),
         InlineKeyboardButton("📞 Support", url=f"https://t.me/{Config.OWNER_USERNAME2.strip('@')}"),
     ]])
     if ext in VIDEO_EXTS:
@@ -368,7 +394,7 @@ IGNORE = ["start","help","cancel","mystats","queue","status","plans","buy",
 async def text_link_handler(client, message: Message):
     urls = extract_urls_from_text(message.text or "")
     if not urls:
-        await message.reply("»»──── ℹ️ No URL ────««\n\nSend a valid link or .txt file.\n/help for info.", quote=True)
+        await message.reply("»»──── ℹ️ No URL ────««\n\nSend a valid link or .txt file.", quote=True)
         return
     await message.reply(f"»»── 📋 {len(urls)} URL(s) queued ──««", quote=True)
     asyncio.ensure_future(_queue_and_process(client, urls, message.from_user.id, message.chat.id, message.id))
@@ -388,7 +414,7 @@ async def document_handler(client, message: Message):
         urls = extract_urls_from_text(content)
         if not urls:
             await client.edit_message_text(message.chat.id, sm.id,
-                "»»──── ❌ No URLs found in file ────««"); return
+                "»»──── ❌ No URLs found ────««"); return
         await client.edit_message_text(message.chat.id, sm.id,
             f"»»── ✅ {len(urls)} URLs found ──««\nQueuing…")
         asyncio.ensure_future(_queue_and_process(client, urls, message.from_user.id, message.chat.id, message.id))
@@ -404,7 +430,7 @@ async def cancel_cmd(client, message: Message):
 async def queue_cmd(client, message: Message):
     active = queue_manager.get_user_active(message.from_user.id)
     if not active:
-        await message.reply("No active downloads in queue.", quote=True); return
+        await message.reply("No active downloads.", quote=True); return
     lines = ["»»────── 📋 YOUR QUEUE ──────««\n"]
     for i, t in enumerate(active, 1):
         lines.append(f"  {i}. [{t.status.upper()}] `{t.url[:40]}`")
