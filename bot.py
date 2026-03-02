@@ -9,7 +9,7 @@
 import asyncio, logging, datetime, os, sys
 
 # ── Ensure /app is on path so all modules resolve correctly ───────────────────
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, "/app")
 
 # ── Flask BEFORE asyncio.run() to avoid event loop conflicts ──────────────────
 from web.app import start_flask_thread
