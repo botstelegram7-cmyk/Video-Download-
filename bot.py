@@ -4,7 +4,10 @@
 ║   Owner: @Xioqui_Xan  |  Support: @TechnicalSerena║
 ╚═══════════════════════════════════════════════════╝
 """
-import asyncio, logging, datetime, os, sys
+import sys
+sys.path.insert(0, "/app")   # ← fix: ensure /app is always on path
+
+import asyncio, logging, datetime, os
 
 # ── Flask BEFORE asyncio.run() — avoids event loop conflict ──────────────────
 from web.app import start_flask_thread
