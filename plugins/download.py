@@ -1,418 +1,368 @@
 """
-╔══════════════════════════════════════════╗
-║  📥  D O W N L O A D  H A N D L E R      ║
-╚══════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════╗
+║   📥  DOWNLOAD  HANDLER                                  ║
+║   text links · .txt bulk · /audio · /info · /queue       ║
+╚══════════════════════════════════════════════════════════╝
 """
 import os, asyncio, logging, time
 from pyrogram import filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton as Btn
 from client import app
 from config import Config
 import database as db
 from utils.helpers import (
-    extract_urls_from_text, detect_url_type,
-    temp_dir_for_user, cleanup, is_owner,
-    format_datetime, human_size
+    extract_urls, url_type, user_dir, cleanup,
+    fmt_size, format_datetime, is_owner
 )
-from utils.progress import build_progress_text, build_queue_text, build_done_text
-from utils.decorators import check_ban, force_subscribe, check_limit
-from downloader.universal import download_url, ytdlp_info_only
-from downloader.processor import (
-    extract_video_thumbnail, extract_pdf_thumbnail,
-    prepare_thumbnail, build_caption, inject_video_metadata,
-    make_telegram_streamable, get_video_info
+from utils.helpers import fmt_dt
+from utils.progress import dl_text, done_text, queue_text
+from utils.decorators import guard
+from downloader.core import download, fetch_info
+from downloader.media import (
+    video_thumb, pdf_thumb, prep_thumb,
+    remux, add_meta, video_info, build_caption
 )
-from queue_manager import queue_manager
+from queue_manager import queue
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
-VIDEO_EXTS = {"mp4", "mkv", "avi", "mov", "webm", "flv", "ts", "wmv", "m4v"}
-AUDIO_EXTS = {"mp3", "aac", "flac", "wav", "ogg", "m4a", "opus"}
-IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "webp", "bmp"}
+VIDEO = {"mp4","mkv","avi","mov","webm","flv","ts","wmv","m4v"}
+AUDIO = {"mp3","aac","flac","wav","ogg","m4a","opus"}
+IMAGE = {"jpg","jpeg","png","gif","webp","bmp"}
 
-# All commands to exclude from generic text handler
-ALL_CMDS = [
-    "start", "help", "cancel", "mystats", "queue", "status",
-    "plans", "buy", "settings", "feedback", "ping", "audio",
-    "info", "history",
-    "givepremium", "removepremium", "ban", "unban",
-    "broadcast", "stats", "users", "banned", "restart"
+# Commands excluded from text handler
+_CMDS = [
+    "start","help","ping","status","plans","buy","settings",
+    "mystats","history","feedback","audio","info","queue","cancel",
+    "givepremium","removepremium","ban","unban","broadcast",
+    "stats","users","banned","restart",
 ]
 
-# ─────────────────────────────────────────
-def make_progress_cb(client, chat_id, msg_id, filename, action="dl"):
-    last_edit = [0.0]
-    async def cb(current, total, speed, elapsed):
+# ────────────────────────────────────────────────────
+def _pcb(client, chat_id, msg_id, fname, action="dl"):
+    """Build async progress callback (rate-limited)."""
+    last = [0.0]
+    async def cb(cur, tot, spd, ela):
         now = time.time()
-        if now - last_edit[0] < Config.PROGRESS_UPDATE_INTERVAL:
-            return
-        last_edit[0] = now
+        if now - last[0] < Config.PROGRESS_IV: return
+        last[0] = now
         try:
-            text = build_progress_text(action, current, total, speed, elapsed, filename)
-            await client.edit_message_text(chat_id, msg_id, text)
-        except Exception:
-            pass
+            await client.edit_message_text(chat_id, msg_id,
+                dl_text(cur, tot, spd, ela, fname, action))
+        except Exception: pass
     return cb
 
-# ─────────────────────────────────────────
-async def smart_upload(client, chat_id, file_path, info, caption, thumb):
-    """
-    Upload file in the correct type based on ACTUAL file extension.
-    Original extension is ALWAYS preserved — zip stays zip, apk stays apk.
-    """
-    ext = (info.get("ext") or os.path.splitext(file_path)[1].lstrip(".")).lower()
-
-    owner_url   = "https://t.me/" + Config.OWNER_USERNAME.strip("@")
-    support_url = "https://t.me/" + Config.OWNER_USERNAME2.strip("@")
-    buttons = InlineKeyboardMarkup([[
-        InlineKeyboardButton("👑 Owner",   url=owner_url),
-        InlineKeyboardButton("📞 Support", url=support_url),
-        InlineKeyboardButton("🔔 Channel", url=Config.FORCE_SUB_CHANNEL),
+# ────────────────────────────────────────────────────
+def _upload_btns() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        Btn("👑 Owner",   url=f"https://t.me/{Config.OWNER_UNAME}"),
+        Btn("📞 Support", url=f"https://t.me/{Config.SUPPORT_UNAME}"),
+        Btn("🔔 Channel", url=Config.FSUB_LINK),
     ]])
 
-    print(f"[UPLOAD] ext={ext} size={os.path.getsize(file_path)}", flush=True)
+async def _upload(client, chat_id, fpath, info, caption, thumb):
+    """Send file in correct Telegram type based on its actual extension."""
+    ext  = (info.get("ext") or os.path.splitext(fpath)[1].lstrip(".")).lower()
+    kb   = _upload_btns()
+    name = os.path.basename(fpath)
+    log.info("Upload: ext=%s size=%s", ext, fmt_size(os.path.getsize(fpath)))
 
-    if ext in VIDEO_EXTS:
-        vinfo = await get_video_info(file_path)
+    if ext in VIDEO:
+        vi = await video_info(fpath)
         await client.send_video(
-            chat_id, video=file_path, caption=caption, thumb=thumb,
-            width=vinfo.get("width", 0), height=vinfo.get("height", 0),
-            duration=int(vinfo.get("duration", 0)),
-            supports_streaming=True, reply_markup=buttons,
+            chat_id, video=fpath, caption=caption, thumb=thumb,
+            width=vi["width"], height=vi["height"],
+            duration=int(vi["duration"]),
+            supports_streaming=True, reply_markup=kb,
         )
-    elif ext in AUDIO_EXTS:
+    elif ext in AUDIO:
         await client.send_audio(
-            chat_id, audio=file_path, caption=caption, thumb=thumb,
-            title=info.get("title", ""), performer=info.get("uploader", ""),
-            reply_markup=buttons,
+            chat_id, audio=fpath, caption=caption, thumb=thumb,
+            title=info.get("title",""), performer=info.get("uploader",""),
+            reply_markup=kb,
         )
-    elif ext in IMAGE_EXTS:
-        await client.send_photo(chat_id, photo=file_path, caption=caption, reply_markup=buttons)
+    elif ext in IMAGE:
+        await client.send_photo(chat_id, photo=fpath, caption=caption, reply_markup=kb)
     elif ext == "pdf":
-        th = thumb or await extract_pdf_thumbnail(file_path, os.path.dirname(file_path))
-        await client.send_document(chat_id, document=file_path, caption=caption, thumb=th, reply_markup=buttons)
+        th = thumb or await pdf_thumb(fpath, os.path.dirname(fpath))
+        await client.send_document(chat_id, document=fpath, caption=caption,
+                                   thumb=th, reply_markup=kb)
     else:
-        # Everything else (zip, rar, apk, exe, iso, dmg, etc.) — send as document
+        # zip, rar, apk, exe, iso, dmg, docx, etc. — send as document, keep filename
         await client.send_document(
-            chat_id, document=file_path, caption=caption,
-            thumb=thumb, reply_markup=buttons,
-            file_name=os.path.basename(file_path)   # preserve original filename
+            chat_id, document=fpath, caption=caption,
+            thumb=thumb, reply_markup=kb, file_name=name,
         )
 
-# ─────────────────────────────────────────
-async def process_single_url(client, url, user_id, chat_id, reply_id, audio_only=False):
-    print(f"[PROCESS] Starting: {url[:80]}", flush=True)
-    progress_msg = await client.send_message(
+# ────────────────────────────────────────────────────
+async def _process(client, url: str, uid: int, chat_id: int,
+                   reply_id: int, audio=False):
+    """Full download → process → upload pipeline."""
+    pm = await client.send_message(
         chat_id,
-        "»»──── 🔍 Analyzing Link… ────««\n\n`" + url[:80] + "`",
-        reply_to_message_id=reply_id
+        "»»──── 🔍 Analyzing… ────««\n\n`" + url[:80] + "`",
+        reply_to_message_id=reply_id,
     )
-    prog_id = progress_msg.id
+    pid = pm.id
+    log.info("process uid=%s url=%s", uid, url[:60])
 
     try:
-        url_type = detect_url_type(url)
-        start    = time.time()
-        dl_cb    = make_progress_cb(client, chat_id, prog_id, url.split("/")[-1][:30])
-        info     = await download_url(url, user_id, progress_cb=dl_cb, audio_only=audio_only)
+        utype = url_type(url)
+        t0    = time.time()
+        cb    = _pcb(client, chat_id, pid, url.split("/")[-1][:30])
+        info  = await download(url, uid, cb=cb, audio=audio)
 
-        print(f"[PROCESS] Downloaded: path={info.get('path')} ext={info.get('ext')}", flush=True)
+        fpath = info.get("path")
+        if not fpath or not os.path.exists(fpath):
+            raise RuntimeError("File not found after download.")
 
-        if not info.get("path") or not os.path.exists(info["path"]):
-            raise RuntimeError("Download failed — file not found after download")
+        size  = os.path.getsize(fpath)
+        ext   = (info.get("ext") or os.path.splitext(fpath)[1].lstrip(".")).lower()
+        title = info.get("title", os.path.basename(fpath))
 
-        file_path = info["path"]
-        file_size = os.path.getsize(file_path)
-        ext       = (info.get("ext") or os.path.splitext(file_path)[1].lstrip(".")).lower()
-        title     = info.get("title", os.path.basename(file_path))
-
-        # Size check
-        if file_size > Config.MAX_FILE_SIZE:
-            await client.edit_message_text(chat_id, prog_id,
+        # Size guard
+        if size > Config.MAX_SIZE:
+            await client.edit_message_text(chat_id, pid,
                 "»»──── ❌ File Too Large ────««\n\n"
-                "Size : **" + human_size(file_size) + "**\n"
-                "Max  : **" + human_size(Config.MAX_FILE_SIZE) + "**\n\n"
-                "Try a shorter video or lower quality."
+                f"Size : **{fmt_size(size)}**\n"
+                f"Max  : **{fmt_size(Config.MAX_SIZE)}**"
             )
-            cleanup(file_path)
-            return
+            cleanup(fpath); return
 
-        # ── Video-only processing ──────────────────────────
-        if ext in VIDEO_EXTS:
-            await client.edit_message_text(chat_id, prog_id,
-                "»»── 🔧 Processing video… ──««\n_(Making Telegram-playable…)_")
-            file_path = await make_telegram_streamable(file_path)
-            # Refresh ext after re-mux
-            ext = os.path.splitext(file_path)[1].lstrip(".").lower()
+        # Video: remux then metadata
+        if ext in VIDEO:
+            await client.edit_message_text(chat_id, pid,
+                "»»── 🔧 Processing video… ──««\n_(Making Telegram-streamable…)_")
+            fpath = await remux(fpath)
+            ext   = os.path.splitext(fpath)[1].lstrip(".")
             info["ext"] = ext
+            fpath = await add_meta(fpath, title, info.get("uploader",""))
 
-        out_dir = os.path.dirname(file_path)
+        outdir = os.path.dirname(fpath)
 
-        # ── Thumbnail ──────────────────────────────────────
+        # Thumbnail
         thumb = info.get("thumbnail")
-        if not thumb and ext in VIDEO_EXTS:
-            thumb = await extract_video_thumbnail(file_path, out_dir)
-        elif not thumb and ext == "pdf":
-            thumb = await extract_pdf_thumbnail(file_path, out_dir)
-        if thumb:
-            thumb = await prepare_thumbnail(thumb)
+        if not thumb and ext in VIDEO: thumb = await video_thumb(fpath, outdir)
+        elif not thumb and ext == "pdf": thumb = await pdf_thumb(fpath, outdir)
+        if thumb: thumb = await prep_thumb(thumb)
 
-        # ── Metadata injection (video only) ───────────────
-        if ext in VIDEO_EXTS:
-            file_path = await inject_video_metadata(
-                file_path, title,
-                artist  = info.get("uploader", ""),
-                comment = "Downloaded by " + Config.BOT_NAME
-            )
-            info["ext"] = os.path.splitext(file_path)[1].lstrip(".")
-
-        # ── Build caption ──────────────────────────────────
-        user  = await db.get_user(user_id)
-        uname = user.get("username") if user else ""
+        # Caption
+        user  = await db.get_user(uid)
+        uname = (user or {}).get("username","")
         me    = await client.get_me()
-        caption = build_caption(
-            title=title, file_size=file_size, url_type=url_type,
-            user_id=user_id, username=uname, bot_username=me.username,
-            uploader=info.get("uploader", ""), duration=info.get("duration", 0),
-            download_date=format_datetime(),
+        cap   = build_caption(
+            title=title, size=size, utype=utype,
+            uid=uid, uname=uname, bot_uname=me.username,
+            uploader=info.get("uploader",""),
+            duration=info.get("duration", 0),
         )
 
-        # ── Upload ─────────────────────────────────────────
-        await client.edit_message_text(chat_id, prog_id,
-            build_progress_text("up", 0, file_size, 0, 0, os.path.basename(file_path)))
+        # Upload progress placeholder
+        await client.edit_message_text(chat_id, pid,
+            dl_text(0, size, 0, 0, os.path.basename(fpath), "up"))
 
-        await smart_upload(client, chat_id, file_path, info, caption, thumb)
+        await _upload(client, chat_id, fpath, info, cap, thumb)
 
-        # ── Done ───────────────────────────────────────────
-        elapsed = time.time() - start
-        avg_spd = file_size / elapsed if elapsed > 0 else 0
-        await client.edit_message_text(chat_id, prog_id,
-            build_done_text(os.path.basename(file_path), file_size, elapsed, avg_spd))
+        elapsed = time.time() - t0
+        await client.edit_message_text(chat_id, pid,
+            done_text(os.path.basename(fpath), size, elapsed,
+                      size / elapsed if elapsed > 0 else 0))
 
+        # Log to channel
         if Config.LOG_CHANNEL:
-            try:
-                await client.forward_messages(Config.LOG_CHANNEL, chat_id, [prog_id])
-            except Exception:
-                pass
+            try: await client.forward_messages(Config.LOG_CHANNEL, chat_id, [pid])
+            except Exception: pass
 
-        await db.increment_daily(user_id)
-        await db.log_download(user_id, url, title, file_size, "done")
-        cleanup(file_path)
+        await db.add_daily(uid)
+        await db.log_dl(uid, url, title, size, "done")
+        cleanup(fpath)
         if thumb: cleanup(thumb)
-        print(f"[PROCESS] Done: {title}", flush=True)
 
     except asyncio.CancelledError:
-        try:
-            await client.edit_message_text(chat_id, prog_id, "»»──── ❌ Cancelled ────««")
-        except Exception: pass
+        try: await client.edit_message_text(chat_id, pid, "»»──── ❌ Cancelled ────««")
+        except: pass
         raise
     except Exception as e:
-        print(f"[PROCESS] ERROR: {e}", flush=True)
-        logger.error("Download error [%s]: %s", url, e, exc_info=True)
+        log.error("process error [%s]: %s", url[:50], e, exc_info=True)
         try:
-            await client.edit_message_text(chat_id, prog_id,
-                "»»──── ❌ Download Failed ────««\n\n"
-                "`" + url[:60] + "`\n\n"
-                "**Error:** `" + str(e)[:300] + "`\n\n"
-                "Try again or contact " + Config.OWNER_USERNAME
+            await client.edit_message_text(chat_id, pid,
+                "»»──── ❌ Failed ────««\n\n"
+                f"`{url[:60]}`\n\n"
+                f"**Error:** `{str(e)[:300]}`\n\n"
+                f"Contact @{Config.OWNER_UNAME} if this persists."
             )
-        except Exception: pass
-        await db.log_download(user_id, url, "", 0, "failed")
+        except: pass
+        await db.log_dl(uid, url, "", 0, "failed")
 
-
-# ─────────────────────────────────────────
-async def queue_and_process(client, urls, user_id, chat_id, reply_id, audio_only=False):
+# ────────────────────────────────────────────────────
+async def _enqueue(client, urls: list, uid: int, chat_id: int,
+                   reply_id: int, audio=False):
     for url in urls:
-        task = await queue_manager.add_task(user_id, url, reply_id, chat_id)
-        pos  = queue_manager.get_position(task.task_id)
+        task = await queue.add(uid, url, chat_id, reply_id)
+        pos  = queue.position(task.task_id)
+
         if pos > 1:
-            q_msg = await client.send_message(
+            qm = await client.send_message(
                 chat_id,
-                build_queue_text(pos, queue_manager.queue_size(), url.split("/")[-1][:30]),
-                reply_to_message_id=reply_id
+                queue_text(pos, queue.size(), url.split("/")[-1][:30]),
+                reply_to_message_id=reply_id,
             )
             try:
-                await asyncio.wait_for(task.future, timeout=Config.DOWNLOAD_TIMEOUT)
+                await asyncio.wait_for(task.future, timeout=Config.DL_TIMEOUT)
             except (asyncio.TimeoutError, asyncio.CancelledError):
-                try:
-                    await client.edit_message_text(chat_id, q_msg.id, "»»──── ⏰ Timed Out ────««")
-                except Exception: pass
+                try: await client.edit_message_text(chat_id, qm.id, "»»──── ⏰ Timed Out ────««")
+                except: pass
                 continue
-            try: await q_msg.delete()
-            except Exception: pass
+            try: await qm.delete()
+            except: pass
         else:
-            if not task.future.done():
-                task.future.set_result("start")
+            if not task.future.done(): task.future.set_result("go")
 
-        if task.status == "cancelled":
-            continue
-        await process_single_url(client, url, user_id, chat_id, reply_id, audio_only=audio_only)
-        await asyncio.sleep(0.5)
+        if task.status == "cancelled": continue
+        await _process(client, url, uid, chat_id, reply_id, audio=audio)
+        await asyncio.sleep(0.3)
 
-
-# ══════════════════════════════════════════════════
+# ════════════════════════════════════════════
 #  /audio
-# ══════════════════════════════════════════════════
+# ════════════════════════════════════════════
 @app.on_message(filters.command("audio") & filters.incoming)
-@check_ban
-@force_subscribe
-@check_limit
-async def audio_cmd(client, message: Message):
-    print(f"[AUDIO] from {message.from_user.id}", flush=True)
-    args = message.text.split(None, 1)
-    if len(args) < 2:
-        await message.reply(
+@guard
+async def cmd_audio(client, msg: Message):
+    parts = msg.text.split(None, 1)
+    if len(parts) < 2:
+        await msg.reply(
             "»»──── 🎵 AUDIO DOWNLOAD ────««\n\n"
             "Usage: `/audio <URL>`\n\n"
-            "Example:\n`/audio https://youtube.com/watch?v=xxx`\n\n"
-            "Downloads **audio only** (MP3)\n\n"
+            "Downloads **audio only** (MP3) from\n"
+            "YouTube, TikTok, Instagram and more.\n\n"
             "»»──────────────────────────««",
             quote=True
         )
         return
-    urls = extract_urls_from_text(args[1])
+    urls = extract_urls(parts[1])
     if not urls:
-        await message.reply("No valid URL found. Usage: `/audio <url>`", quote=True)
-        return
-    await message.reply("»»── 🎵 Audio Download Queued ──««\n\nProcessing…", quote=True)
-    asyncio.ensure_future(
-        queue_and_process(client, urls, message.from_user.id, message.chat.id, message.id, audio_only=True)
-    )
-
-
-# ══════════════════════════════════════════════════
-#  /info
-# ══════════════════════════════════════════════════
-@app.on_message(filters.command("info") & filters.incoming)
-@check_ban
-@force_subscribe
-async def info_cmd(client, message: Message):
-    print(f"[INFO] from {message.from_user.id}", flush=True)
-    args = message.text.split(None, 1)
-    if len(args) < 2:
-        await message.reply(
-            "»»──── ℹ️ URL INFO ────««\n\n"
-            "Usage: `/info <URL>`\n\nGets info without downloading.\n\n"
-            "»»──────────────────────────««",
-            quote=True
-        )
-        return
-    urls = extract_urls_from_text(args[1])
-    if not urls:
-        await message.reply("No valid URL found.", quote=True)
-        return
-    url  = urls[0]
-    wait = await message.reply("»»──── 🔍 Fetching info… ────««", quote=True)
-    try:
-        info = await ytdlp_info_only(url)
-        title    = (info.get("title") or "Unknown")[:60]
-        uploader = info.get("uploader", "Unknown")
-        duration = info.get("duration", 0)
-        views    = info.get("view_count", 0) or 0
-        url_type = detect_url_type(url).upper()
-
-        def hms(s):
-            if not s: return "N/A"
-            m, s = divmod(int(s), 60)
-            h, m = divmod(m, 60)
-            return ("%02d:%02d:%02d" % (h, m, s)) if h else ("%02d:%02d" % (m, s))
-
-        text = (
-            "»»──────── ℹ️ URL INFO ────────««\n\n"
-            "📄 **Title**    : " + title + "\n"
-            "👤 **Uploader** : " + str(uploader) + "\n"
-            "🏷️  **Source**   : " + url_type + "\n"
-            "⏱️  **Duration** : " + hms(duration) + "\n"
-            "👁️  **Views**    : " + "{:,}".format(views) + "\n\n"
-            "»»──────────────────────────────««"
-        )
-        await wait.edit_text(text)
-    except Exception as e:
-        await wait.edit_text(
-            "»»──── ❌ Info Failed ────««\n\n"
-            "Could not fetch info.\nError: `" + str(e)[:200] + "`"
-        )
-
-
-# ══════════════════════════════════════════════════
-#  Text message handler (main download trigger)
-# ══════════════════════════════════════════════════
-@app.on_message(filters.incoming & filters.text & ~filters.command(ALL_CMDS))
-@check_ban
-@force_subscribe
-@check_limit
-async def text_link_handler(client, message: Message):
-    print(f"[TEXT] from {message.from_user.id}: {(message.text or '')[:60]}", flush=True)
-    urls = extract_urls_from_text(message.text or "")
-    if not urls:
-        await message.reply(
-            "»»──── ℹ️ No URL Found ────««\n\n"
-            "Send a **valid URL** or **.txt file** with links.\n"
-            "Type /help for instructions.",
-            quote=True
-        )
-        return
-    await message.reply(
-        "»»── 📋 " + str(len(urls)) + " URL(s) Queued ──««\n\nProcessing now…",
+        await msg.reply("No valid URL found.", quote=True); return
+    await msg.reply(
+        f"»»── 🎵 Audio queued ({len(urls)} URL) ──««\n\nProcessing…",
         quote=True
     )
     asyncio.ensure_future(
-        queue_and_process(client, urls, message.from_user.id, message.chat.id, message.id)
+        _enqueue(client, urls, msg.from_user.id, msg.chat.id, msg.id, audio=True)
     )
 
-
-# ══════════════════════════════════════════════════
-#  Document handler (.txt file with links)
-# ══════════════════════════════════════════════════
-@app.on_message(filters.incoming & filters.document)
-@check_ban
-@force_subscribe
-@check_limit
-async def document_handler(client, message: Message):
-    doc = message.document
-    if doc and doc.file_name and doc.file_name.lower().endswith(".txt"):
-        status_msg = await message.reply("»»── 📄 Reading links file… ──««", quote=True)
-        out_dir    = temp_dir_for_user(message.from_user.id)
-        txt_path   = os.path.join(out_dir, "links.txt")
-        await message.download(file_name=txt_path)
-        with open(txt_path, "r", errors="ignore") as f:
-            content = f.read()
-        urls = extract_urls_from_text(content)
-        if not urls:
-            await client.edit_message_text(message.chat.id, status_msg.id,
-                "»»──── ❌ No URLs Found ────««\n\nNo valid URLs found in your .txt file.")
-            return
-        await client.edit_message_text(message.chat.id, status_msg.id,
-            "»»── ✅ Found **" + str(len(urls)) + " URLs** ──««\nQueuing all downloads…")
-        asyncio.ensure_future(
-            queue_and_process(client, urls, message.from_user.id, message.chat.id, message.id)
+# ════════════════════════════════════════════
+#  /info
+# ════════════════════════════════════════════
+@app.on_message(filters.command("info") & filters.incoming)
+@guard
+async def cmd_info(client, msg: Message):
+    parts = msg.text.split(None, 1)
+    if len(parts) < 2:
+        await msg.reply(
+            "»»──── ℹ️ URL INFO ────««\n\nUsage: `/info <URL>`\n\n"
+            "Gets info **without downloading**.\n\n»»──────────────────────────««",
+            quote=True
         )
-    else:
-        await message.reply(
+        return
+    urls = extract_urls(parts[1])
+    if not urls:
+        await msg.reply("No valid URL found.", quote=True); return
+
+    url  = urls[0]
+    wait = await msg.reply("»»──── 🔍 Fetching info… ────««", quote=True)
+    try:
+        info  = await fetch_info(url)
+        title = (info.get("title") or "Unknown")[:60]
+        upl   = info.get("uploader","Unknown")
+        dur   = info.get("duration", 0)
+        views = info.get("view_count", 0) or 0
+        src   = url_type(url).upper()
+        def hms(s):
+            if not s: return "N/A"
+            m,s = divmod(int(s),60); h,m = divmod(m,60)
+            return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+        txt = (
+            "»»──────── ℹ️ URL INFO ────────««\n\n"
+            f"📄 **Title**    : {title}\n"
+            f"👤 **Uploader** : {upl}\n"
+            f"🏷️  **Source**   : {src}\n"
+            f"⏱️  **Duration** : {hms(dur)}\n"
+            f"👁️  **Views**    : {views:,}\n\n"
+            "»»──────────────────────────────««"
+        )
+        await wait.edit_text(txt)
+    except Exception as e:
+        await wait.edit_text(
+            "»»──── ❌ Info Failed ────««\n\nError: `" + str(e)[:200] + "`")
+
+# ════════════════════════════════════════════
+#  Text message — main download trigger
+# ════════════════════════════════════════════
+@app.on_message(filters.incoming & filters.text & ~filters.command(_CMDS))
+@guard
+async def handle_text(client, msg: Message):
+    urls = extract_urls(msg.text or "")
+    if not urls:
+        await msg.reply(
+            "»»──── ℹ️ No URL Found ────««\n\n"
+            "Send a **valid URL** or **.txt** file with links.\n"
+            "/help for instructions.",
+            quote=True
+        )
+        return
+    await msg.reply(
+        f"»»── 📋 {len(urls)} URL(s) queued ──««\n\nProcessing…",
+        quote=True
+    )
+    asyncio.ensure_future(
+        _enqueue(client, urls, msg.from_user.id, msg.chat.id, msg.id)
+    )
+
+# ════════════════════════════════════════════
+#  Document — .txt bulk download
+# ════════════════════════════════════════════
+@app.on_message(filters.incoming & filters.document)
+@guard
+async def handle_doc(client, msg: Message):
+    doc = msg.document
+    if not (doc and doc.file_name and doc.file_name.lower().endswith(".txt")):
+        await msg.reply(
             "»»──── ℹ️ Unsupported File ────««\n\n"
             "Only **.txt** files with links are supported.",
             quote=True
-        )
+        ); return
 
-
-# ══════════════════════════════════════════════════
-#  /cancel  /queue
-# ══════════════════════════════════════════════════
-@app.on_message(filters.command("cancel") & filters.incoming)
-async def cancel_cmd(client, message: Message):
-    count = await queue_manager.cancel_user_tasks(message.from_user.id)
-    await message.reply(
-        "»»──── ❌ CANCELLED ────««\n\nCancelled **" + str(count) + "** pending download(s).",
-        quote=True
+    sm  = await msg.reply("»»── 📄 Reading links file… ──««", quote=True)
+    out = user_dir(msg.from_user.id)
+    txt = os.path.join(out, "links.txt")
+    await msg.download(file_name=txt)
+    with open(txt, "r", errors="ignore") as f:
+        content = f.read()
+    urls = extract_urls(content)
+    if not urls:
+        await sm.edit_text("»»──── ❌ No URLs Found ────««\n\nNo valid URLs in file.")
+        return
+    await sm.edit_text(f"»»── ✅ Found **{len(urls)} URLs** ──««\nQueuing all downloads…")
+    asyncio.ensure_future(
+        _enqueue(client, urls, msg.from_user.id, msg.chat.id, msg.id)
     )
 
+# ════════════════════════════════════════════
+#  /cancel  /queue
+# ════════════════════════════════════════════
+@app.on_message(filters.command("cancel") & filters.incoming)
+async def cmd_cancel(client, msg: Message):
+    n = await queue.cancel_user(msg.from_user.id)
+    await msg.reply(f"»»──── ❌ CANCELLED ────««\n\nCancelled **{n}** task(s).", quote=True)
+
 @app.on_message(filters.command("queue") & filters.incoming)
-async def queue_cmd(client, message: Message):
-    active = queue_manager.get_user_active(message.from_user.id)
+async def cmd_queue(client, msg: Message):
+    active = queue.user_active(msg.from_user.id)
     if not active:
-        await message.reply("»»──── 📋 QUEUE ────««\n\nNo active downloads.", quote=True)
+        await msg.reply("»»──── 📋 QUEUE ────««\n\nNo active downloads.", quote=True)
         return
     lines = ["»»────── 📋 YOUR QUEUE ──────««\n"]
     for i, t in enumerate(active, 1):
-        lines.append("  " + str(i) + ". [" + t.status.upper() + "] `" + t.url[:40] + "`")
+        lines.append(f"  {i}. [{t.status.upper()}] `{t.url[:40]}`")
     lines.append("\n»»──────────────────────────««")
-    await message.reply("\n".join(lines), quote=True)
+    await msg.reply("\n".join(lines), quote=True)

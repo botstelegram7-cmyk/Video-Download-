@@ -1,9 +1,10 @@
 """
-╔══════════════════════════════════════════╗
-║    👑  A D M I N  H A N D L E R S         ║
-╚══════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════╗
+║   👑  ADMIN  PANEL                                       ║
+║   givepremium · ban · broadcast · stats · restart        ║
+╚══════════════════════════════════════════════════════════╝
 """
-import asyncio, logging, os
+import asyncio, logging, os, sys
 from pyrogram import filters
 from pyrogram.types import Message
 from client import app
@@ -11,214 +12,211 @@ from config import Config
 import database as db
 from utils.decorators import owner_only
 from utils.helpers import plan_badge
-from plugins.start import uptime_str
+from plugins.start import uptime
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
-@app.on_message(filters.command("givepremium") & filters.private)
+# ════════════════════════════════════════════
+#  /givepremium
+# ════════════════════════════════════════════
+@app.on_message(filters.command("givepremium") & filters.incoming)
 @owner_only
-async def give_premium_cmd(client, message: Message):
-    args = message.command[1:]
+async def cmd_giveprem(client, msg: Message):
+    args = msg.command[1:]
     if len(args) < 2:
-        await message.reply(
-            "»»──── ℹ️ Usage ────««\n\n"
+        await msg.reply(
+            "»»──── ℹ️ USAGE ────««\n\n"
             "/givepremium `<user_id>` `<plan>`\n\n"
             "**Plans:** `basic` (1 month) | `premium` (1 year)",
             quote=True
-        )
-        return
+        ); return
     try:
-        target_id = int(args[0])
-        plan      = args[1].lower().strip()
+        uid  = int(args[0])
+        plan = args[1].lower().strip()
     except ValueError:
-        await message.reply("Invalid user ID.", quote=True)
-        return
+        await msg.reply("❌ Invalid user ID.", quote=True); return
 
     if plan == "basic":
-        days, label = Config.BASIC_PLAN_DAYS, "🥉 Basic (1 Month)"
+        days, label = Config.BASIC_DAYS,   "🥉 Basic (1 Month)"
     elif plan == "premium":
-        days, label = Config.PREMIUM_PLAN_DAYS, "💎 Premium (1 Year)"
+        days, label = Config.PREMIUM_DAYS, "💎 Premium (1 Year)"
     else:
-        await message.reply("Use `basic` or `premium`.", quote=True)
-        return
+        await msg.reply("❌ Plan must be `basic` or `premium`.", quote=True); return
 
-    user = await db.get_user(target_id)
-    if not user:
-        await message.reply("User `" + str(target_id) + "` not found in database.", quote=True)
-        return
+    if not await db.get_user(uid):
+        await msg.reply(f"❌ User `{uid}` not found.", quote=True); return
 
-    await db.set_plan(target_id, plan, days)
+    await db.set_plan(uid, plan, days)
     try:
-        await client.send_message(target_id,
-            "»»──── 🎉 Plan Activated ────««\n\n"
-            "🎊 Your plan upgraded to **" + label + "**!\n"
-            "Thank you for supporting us! 💖\n\n"
+        await client.send_message(
+            uid,
+            "»»──── 🎉 Plan Activated! ────««\n\n"
+            f"🎊 Your plan: **{label}**\n"
+            "Thank you! 💖\n\n"
             "»»──────────────────────────««"
         )
-    except Exception:
-        pass
-    await message.reply(
-        "»»──── ✅ Plan Granted ────««\n\n"
-        "👤 User : `" + str(target_id) + "`\n"
-        "🏷️  Plan : **" + label + "**\n"
-        "📅 Days : **" + str(days) + "**",
+    except: pass
+    await msg.reply(
+        "»»──── ✅ Done ────««\n\n"
+        f"👤 User : `{uid}`\n"
+        f"🏷️  Plan : **{label}**\n"
+        f"📅 Days : **{days}**",
         quote=True
     )
 
-@app.on_message(filters.command("removepremium") & filters.private)
+# ════════════════════════════════════════════
+#  /removepremium
+# ════════════════════════════════════════════
+@app.on_message(filters.command("removepremium") & filters.incoming)
 @owner_only
-async def remove_premium_cmd(client, message: Message):
-    args = message.command[1:]
+async def cmd_remprem(client, msg: Message):
+    args = msg.command[1:]
     if not args:
-        await message.reply("/removepremium `<user_id>`", quote=True)
-        return
-    try:
-        target_id = int(args[0])
+        await msg.reply("/removepremium `<user_id>`", quote=True); return
+    try: uid = int(args[0])
     except ValueError:
-        await message.reply("Invalid ID.", quote=True)
-        return
-    if not await db.get_user(target_id):
-        await message.reply("User `" + str(target_id) + "` not found.", quote=True)
-        return
-    await db.remove_plan(target_id)
+        await msg.reply("❌ Invalid ID.", quote=True); return
+    if not await db.get_user(uid):
+        await msg.reply(f"❌ User `{uid}` not found.", quote=True); return
+    await db.remove_plan(uid)
     try:
-        await client.send_message(target_id,
+        await client.send_message(uid,
             "»»──── ℹ️ Plan Update ────««\n\n"
             "Your plan has been reverted to **Free**.\n"
-            "Contact " + Config.OWNER_USERNAME + " for queries."
-        )
-    except Exception:
-        pass
-    await message.reply("Plan removed for `" + str(target_id) + "`.", quote=True)
+            f"Contact @{Config.OWNER_UNAME} for queries.")
+    except: pass
+    await msg.reply(f"✅ Plan removed for `{uid}`.", quote=True)
 
-@app.on_message(filters.command("ban") & filters.private)
+# ════════════════════════════════════════════
+#  /ban  /unban
+# ════════════════════════════════════════════
+@app.on_message(filters.command("ban") & filters.incoming)
 @owner_only
-async def ban_cmd(client, message: Message):
-    args = message.command[1:]
+async def cmd_ban(client, msg: Message):
+    args = msg.command[1:]
     if not args:
-        await message.reply("/ban `<user_id>`", quote=True)
-        return
-    try:
-        uid = int(args[0])
+        await msg.reply("/ban `<user_id>`", quote=True); return
+    try: uid = int(args[0])
     except ValueError:
-        await message.reply("Invalid ID.", quote=True)
-        return
-    await db.ban_user(uid)
+        await msg.reply("❌ Invalid ID.", quote=True); return
+    await db.ban(uid)
     try:
         await client.send_message(uid,
-            "»»──── 🚫 Account Banned ────««\n\n"
-            "You have been banned from using this bot.\n"
-            "Contact " + Config.OWNER_USERNAME + " for appeal."
-        )
-    except Exception:
-        pass
-    await message.reply("User `" + str(uid) + "` **banned**.", quote=True)
+            "»»──── 🚫 Banned ────««\n\n"
+            "You have been banned.\n"
+            f"Contact @{Config.OWNER_UNAME} to appeal.")
+    except: pass
+    await msg.reply(f"🚫 Banned `{uid}`.", quote=True)
 
-@app.on_message(filters.command("unban") & filters.private)
+@app.on_message(filters.command("unban") & filters.incoming)
 @owner_only
-async def unban_cmd(client, message: Message):
-    args = message.command[1:]
+async def cmd_unban(client, msg: Message):
+    args = msg.command[1:]
     if not args:
-        await message.reply("/unban `<user_id>`", quote=True)
-        return
-    try:
-        uid = int(args[0])
+        await msg.reply("/unban `<user_id>`", quote=True); return
+    try: uid = int(args[0])
     except ValueError:
-        await message.reply("Invalid ID.", quote=True)
-        return
-    await db.unban_user(uid)
+        await msg.reply("❌ Invalid ID.", quote=True); return
+    await db.unban(uid)
     try:
         await client.send_message(uid,
-            "»»──── ✅ Account Unbanned ────««\n\n"
-            "Your ban has been lifted. You can use the bot again!"
-        )
-    except Exception:
-        pass
-    await message.reply("User `" + str(uid) + "` **unbanned**.", quote=True)
+            "»»──── ✅ Unbanned ────««\n\nYour ban has been lifted!")
+    except: pass
+    await msg.reply(f"✅ Unbanned `{uid}`.", quote=True)
 
-@app.on_message(filters.command("stats") & filters.private)
+# ════════════════════════════════════════════
+#  /stats
+# ════════════════════════════════════════════
+@app.on_message(filters.command("stats") & filters.incoming)
 @owner_only
-async def stats_cmd(client, message: Message):
-    total_users = await db.get_total_users()
-    total_dls   = await db.get_total_downloads()
-    premium     = await db.get_premium_users()
-    banned      = await db.get_banned_users()
-    me          = await client.get_me()
-    prem_count  = len([u for u in premium if u["plan"] == "premium"])
-    basic_count = len([u for u in premium if u["plan"] == "basic"])
-    await message.reply(
-        "»»────── 📊 BOT STATISTICS ──────««\n\n"
-        "🤖 Bot         : @" + me.username + "\n"
-        "⏰ Uptime      : **" + uptime_str() + "**\n"
-        "👥 Total Users : **" + str(total_users) + "**\n"
-        "📥 Total DLs   : **" + str(total_dls) + "**\n"
-        "💎 Premium     : **" + str(prem_count) + "**\n"
-        "🥉 Basic       : **" + str(basic_count) + "**\n"
-        "🚫 Banned      : **" + str(len(banned)) + "**\n\n"
+async def cmd_stats(client, msg: Message):
+    tu   = await db.total_users()
+    td   = await db.total_downloads()
+    prem = await db.premium_users()
+    ban  = await db.banned_users()
+    me   = await client.get_me()
+    p    = sum(1 for u in prem if u["plan"]=="premium")
+    b    = sum(1 for u in prem if u["plan"]=="basic")
+    await msg.reply(
+        "»»──────── 📊 BOT STATS ────────««\n\n"
+        f"🤖 Bot      : @{me.username}\n"
+        f"⏰ Uptime   : **{uptime()}**\n"
+        f"👥 Users    : **{tu}**\n"
+        f"📥 DLs Done : **{td}**\n"
+        f"💎 Premium  : **{p}**\n"
+        f"🥉 Basic    : **{b}**\n"
+        f"🚫 Banned   : **{len(ban)}**\n\n"
         "»»──────────────────────────────««",
         quote=True
     )
 
-@app.on_message(filters.command("users") & filters.private)
+# ════════════════════════════════════════════
+#  /users
+# ════════════════════════════════════════════
+@app.on_message(filters.command("users") & filters.incoming)
 @owner_only
-async def users_cmd(client, message: Message):
-    premium = await db.get_premium_users()
-    if not premium:
-        await message.reply("No premium users.", quote=True)
-        return
+async def cmd_users(client, msg: Message):
+    prem = await db.premium_users()
+    if not prem:
+        await msg.reply("No premium users.", quote=True); return
     lines = ["»»──── 💎 PREMIUM USERS ────««\n"]
-    for u in premium[:20]:
-        expiry = (u.get("plan_expiry") or "")[:10]
+    for u in prem[:25]:
+        exp = (u.get("plan_expiry") or "")[:10]
         lines.append(
-            "  [" + plan_badge(u["plan"]) + "] `" + str(u["user_id"]) + "` "
-            "(@" + str(u.get("username", "?")) + ") → " + expiry
+            f"  [{plan_badge(u['plan'])}] `{u['user_id']}` "
+            f"(@{u.get('username','?')}) → {exp}"
         )
-    if len(premium) > 20:
-        lines.append("\n  ...and " + str(len(premium) - 20) + " more")
+    if len(prem) > 25:
+        lines.append(f"\n  …and {len(prem)-25} more")
     lines.append("\n»»──────────────────────────««")
-    await message.reply("\n".join(lines), quote=True)
+    await msg.reply("\n".join(lines), quote=True)
 
-@app.on_message(filters.command("banned") & filters.private)
+# ════════════════════════════════════════════
+#  /banned
+# ════════════════════════════════════════════
+@app.on_message(filters.command("banned") & filters.incoming)
 @owner_only
-async def banned_cmd(client, message: Message):
-    banned = await db.get_banned_users()
-    if not banned:
-        await message.reply("No banned users.", quote=True)
-        return
+async def cmd_banned(client, msg: Message):
+    ban = await db.banned_users()
+    if not ban:
+        await msg.reply("No banned users.", quote=True); return
     lines = ["»»──── 🚫 BANNED USERS ────««\n"]
-    for u in banned[:20]:
-        lines.append("  `" + str(u["user_id"]) + "` (@" + str(u.get("username", "?")) + ")")
+    for u in ban[:25]:
+        lines.append(f"  `{u['user_id']}` (@{u.get('username','?')})")
     lines.append("\n»»──────────────────────────««")
-    await message.reply("\n".join(lines), quote=True)
+    await msg.reply("\n".join(lines), quote=True)
 
-@app.on_message(filters.command("broadcast") & filters.private)
+# ════════════════════════════════════════════
+#  /broadcast
+# ════════════════════════════════════════════
+@app.on_message(filters.command("broadcast") & filters.incoming)
 @owner_only
-async def broadcast_cmd(client, message: Message):
-    if len(message.command) < 2 and not message.reply_to_message:
-        await message.reply("Usage: `/broadcast <message>` or reply to a message with /broadcast", quote=True)
-        return
-    user_ids = await db.get_all_user_ids()
-    status   = await message.reply(
-        "📡 Broadcasting to **" + str(len(user_ids)) + "** users…", quote=True)
-    success = fail = 0
-    for uid in user_ids:
+async def cmd_broadcast(client, msg: Message):
+    if len(msg.command) < 2 and not msg.reply_to_message:
+        await msg.reply(
+            "Usage: `/broadcast <message>`\nor reply to a message with /broadcast",
+            quote=True
+        ); return
+    uids   = await db.all_user_ids()
+    sm     = await msg.reply(f"📡 Sending to **{len(uids)}** users…", quote=True)
+    ok = fail = 0
+    for uid in uids:
         try:
-            if message.reply_to_message:
-                await message.reply_to_message.copy(uid)
-            else:
-                await client.send_message(uid, message.text.split(None, 1)[1])
-            success += 1
-        except Exception:
-            fail += 1
+            if msg.reply_to_message: await msg.reply_to_message.copy(uid)
+            else: await client.send_message(uid, msg.text.split(None,1)[1])
+            ok += 1
+        except: fail += 1
         await asyncio.sleep(0.05)
-    await client.edit_message_text(message.chat.id, status.id,
+    await sm.edit_text(
         "»»──── 📡 Broadcast Done ────««\n\n"
-        "✅ Sent   : **" + str(success) + "**\n"
-        "❌ Failed : **" + str(fail) + "**"
+        f"✅ Sent   : **{ok}**\n❌ Failed : **{fail}**"
     )
 
-@app.on_message(filters.command("restart") & filters.private)
+# ════════════════════════════════════════════
+#  /restart
+# ════════════════════════════════════════════
+@app.on_message(filters.command("restart") & filters.incoming)
 @owner_only
-async def restart_cmd(client, message: Message):
-    await message.reply("»»──── 🔄 Restarting… ────««\n\nBot will restart in a moment.", quote=True)
-    os.execv(__import__("sys").executable, ["python"] + __import__("sys").argv)
+async def cmd_restart(client, msg: Message):
+    await msg.reply("»»──── 🔄 Restarting… ────««", quote=True)
+    os.execv(sys.executable, [sys.executable] + sys.argv)
