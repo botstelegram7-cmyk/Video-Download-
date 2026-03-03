@@ -1,53 +1,66 @@
-import asyncio, os, threading
+import asyncio
+import os
+import threading
 from config import YT_COOKIES, INSTAGRAM_COOKIES, TERABOX_COOKIES
 
-# ── Resolve cookies from env vars ──────────────────────────────────────────
+BANNER = """
+╔══════════════════════════════════════════╗
+║   𝗦𝗲𝗿𝗲𝗻𝗮 𝗗𝗼𝘄𝗻𝗹𝗼𝗮𝗱𝗲𝗿 𝗕𝗼𝘁              ║
+║   @Universal_DownloadBot                 ║
+║   Owner : @Xioqui_Xan                    ║
+║   Support: @TechnicalSerena              ║
+╚══════════════════════════════════════════╝
+"""
+
+
 def resolve_cookies():
+    """
+    Write cookie env vars to /tmp files so yt-dlp can read them.
+    Handles both actual newlines and \\n-escaped newlines from Render.
+    """
     mapping = {
-        "YT_COOKIES":        ("/tmp/cookie_YT_COOKIES.txt",        YT_COOKIES),
-        "INSTAGRAM_COOKIES": ("/tmp/cookie_INSTAGRAM_COOKIES.txt", INSTAGRAM_COOKIES),
-        "TERABOX_COOKIES":   ("/tmp/cookie_TERABOX_COOKIES.txt",   TERABOX_COOKIES),
+        "YT_COOKIES":        ("/tmp/yt_cookies.txt",  YT_COOKIES),
+        "INSTAGRAM_COOKIES": ("/tmp/ig_cookies.txt",  INSTAGRAM_COOKIES),
+        "TERABOX_COOKIES":   ("/tmp/tb_cookies.txt",  TERABOX_COOKIES),
     }
     for name, (path, raw) in mapping.items():
-        raw = raw.strip()
-        if raw and (raw.startswith("# Netscape") or "\t" in raw):
-            with open(path, "w") as f:
-                f.write(raw)
-            print(f"[COOKIES] {name} → wrote {path} ({len(raw)} chars)")
-
-# ── Startup banner ─────────────────────────────────────────────────────────
-BANNER = r"""
-╔════════════════════════════════════════╗
-║   𝗦𝗲𝗿𝗲𝗻𝗮 𝗗𝗼𝘄𝗻𝗹𝗼𝗮𝗱𝗲𝗿 𝗕𝗼𝘁            ║
-║   @Universal_DownloadBot               ║
-║   Owner: @Xioqui_Xan                   ║
-╚════════════════════════════════════════╝
-"""
+        if not raw or not raw.strip():
+            continue
+        # Render stores multiline env vars with literal \n — fix that
+        raw = raw.replace("\\n", "\n").strip()
+        # Accept any cookie content (Netscape header optional)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(raw)
+        print(f"[COOKIES] {name} → {path} ({len(raw)} chars)")
 
 
 async def main():
     print(BANNER)
     resolve_cookies()
 
-    # ── Init DB ──
+    # Init database
     import database
     await database.init_db()
+    print("[DB] Database ready")
 
-    # ── Import plugins BEFORE app.start() ──
-    import plugins.start    # noqa: F401 — registers handlers at import time
-    import plugins.download # noqa: F401
-    import plugins.admin    # noqa: F401
+    # Import ALL plugins BEFORE app.start() — decorators register at import time
+    import plugins.start     # noqa: F401
+    import plugins.download  # noqa: F401
+    import plugins.admin     # noqa: F401
+    import plugins.reactions # noqa: F401
+    print("[PLUGINS] All plugins loaded")
 
-    # ── Start Flask keep-alive in background thread ──
+    # Start Flask keep-alive (required for Render Web Service)
     from web.app import run as flask_run
     t = threading.Thread(target=flask_run, daemon=True)
     t.start()
-    print("[WEB] Flask keep-alive started")
+    print(f"[WEB] Flask keep-alive running")
 
-    # ── Start Pyrogram ──
+    # Start Pyrogram
     from client import app
     await app.start()
-    print("[BOT] Serena is online!")
+    me = await app.get_me()
+    print(f"[BOT] @{me.username} is online! ✅")
 
     await asyncio.get_event_loop().create_future()   # run forever
 

@@ -11,13 +11,13 @@ async def init_db():
         await db.executescript("""
         CREATE TABLE IF NOT EXISTS users (
             user_id     INTEGER PRIMARY KEY,
-            username    TEXT,
-            full_name   TEXT,
-            plan        TEXT    DEFAULT 'free',
-            plan_expiry TEXT    DEFAULT '',
+            username    TEXT    DEFAULT \'\',
+            full_name   TEXT    DEFAULT \'\',
+            plan        TEXT    DEFAULT \'free\',
+            plan_expiry TEXT    DEFAULT \'\',
             daily_count INTEGER DEFAULT 0,
-            last_reset  TEXT    DEFAULT '',
-            joined_at   TEXT    DEFAULT '',
+            last_reset  TEXT    DEFAULT \'\',
+            joined_at   TEXT    DEFAULT \'\',
             is_banned   INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS downloads (
@@ -26,14 +26,14 @@ async def init_db():
             url        TEXT,
             title      TEXT,
             file_size  INTEGER DEFAULT 0,
-            status     TEXT    DEFAULT 'pending',
-            created_at TEXT
+            status     TEXT    DEFAULT \'pending\',
+            created_at TEXT    DEFAULT \'\'
         );
         CREATE TABLE IF NOT EXISTS feedback (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id    INTEGER,
             text       TEXT,
-            created_at TEXT
+            created_at TEXT    DEFAULT \'\'
         );
         """)
         await db.commit()
@@ -53,7 +53,9 @@ async def upsert_user(user_id: int, username: str = "", full_name: str = ""):
         await db.execute("""
             INSERT INTO users (user_id, username, full_name, joined_at, last_reset)
             VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET username=excluded.username, full_name=excluded.full_name
+            ON CONFLICT(user_id) DO UPDATE SET
+                username=excluded.username,
+                full_name=excluded.full_name
         """, (user_id, username or "", full_name or "", now, now))
         await db.commit()
 
@@ -70,19 +72,21 @@ async def check_and_reset_daily(user_id: int):
                 (today, user_id))
             await db.commit()
         user["daily_count"] = 0
-        user["last_reset"] = today
+        user["last_reset"]  = today
     return user
 
 
 async def increment_daily(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET daily_count=daily_count+1 WHERE user_id=?", (user_id,))
+        await db.execute(
+            "UPDATE users SET daily_count=daily_count+1 WHERE user_id=?", (user_id,))
         await db.commit()
 
 
 async def set_plan(user_id: int, plan: str, expiry: str = ""):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET plan=?, plan_expiry=? WHERE user_id=?", (plan, expiry, user_id))
+        await db.execute(
+            "UPDATE users SET plan=?, plan_expiry=? WHERE user_id=?", (plan, expiry, user_id))
         await db.commit()
 
 
@@ -123,7 +127,7 @@ async def get_history(user_id: int, limit: int = 10):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM downloads WHERE user_id=? AND status='done' ORDER BY id DESC LIMIT ?",
+            "SELECT * FROM downloads WHERE user_id=? AND status=\'done\' ORDER BY id DESC LIMIT ?",
             (user_id, limit)) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
@@ -131,17 +135,21 @@ async def get_history(user_id: int, limit: int = 10):
 async def save_feedback(user_id: int, text: str):
     now = datetime.utcnow().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("INSERT INTO feedback (user_id,text,created_at) VALUES (?,?,?)", (user_id, text, now))
+        await db.execute(
+            "INSERT INTO feedback (user_id,text,created_at) VALUES (?,?,?)",
+            (user_id, text, now))
         await db.commit()
 
 
 async def get_stats():
     async with aiosqlite.connect(DB_PATH) as db:
-        async def cnt(q): return (await (await db.execute(q)).fetchone())[0]
+        async def cnt(q):
+            async with db.execute(q) as c:
+                return (await c.fetchone())[0]
         return {
             "total_users":     await cnt("SELECT COUNT(*) FROM users"),
-            "total_downloads": await cnt("SELECT COUNT(*) FROM downloads WHERE status='done'"),
-            "premium_users":   await cnt("SELECT COUNT(*) FROM users WHERE plan IN ('basic','premium')"),
+            "total_downloads": await cnt("SELECT COUNT(*) FROM downloads WHERE status=\'done\'"),
+            "premium_users":   await cnt("SELECT COUNT(*) FROM users WHERE plan IN (\'basic\',\'premium\')"),
             "banned_users":    await cnt("SELECT COUNT(*) FROM users WHERE is_banned=1"),
         }
 
@@ -156,7 +164,7 @@ async def get_all_users():
 async def get_premium_users():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM users WHERE plan IN ('basic','premium')") as cur:
+        async with db.execute("SELECT * FROM users WHERE plan IN (\'basic\',\'premium\')") as cur:
             return [dict(r) for r in await cur.fetchall()]
 
 

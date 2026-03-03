@@ -23,8 +23,13 @@ DB_PATH           = os.getenv("DB_PATH", "/tmp/serena_db/bot.db")
 DL_DIR            = os.getenv("DL_DIR",  "/tmp/serena_dl")
 PORT              = int(os.getenv("PORT", "10000"))
 
+# Raw Netscape cookie text — set in Render dashboard (multiline)
 YT_COOKIES        = os.getenv("YT_COOKIES",        "")
 INSTAGRAM_COOKIES = os.getenv("INSTAGRAM_COOKIES", "")
 TERABOX_COOKIES   = os.getenv("TERABOX_COOKIES",   "")
 
 MAX_SIZE          = 2 * 1024 * 1024 * 1024   # 2 GB
+
+# Reactions — bot reacts to every message with one of these
+REACTION_EMOJIS   = ["❤️","🔥","👍","🎉","⚡","🥰","😍","🤩","✨","💯","🎶","🙌","💪","😎","🫡"]
+REACTIONS_ENABLED = os.getenv("REACTIONS_ENABLED", "true").lower() == "true"
