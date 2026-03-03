@@ -1,46 +1,58 @@
-"""Progress bar builder for download/upload messages."""
-import math
-from utils.helpers import fmt_size, fmt_time
+import time
 
-def bar(cur: int, tot: int, length: int = 14) -> str:
-    if tot <= 0: return "▰" * length
-    f = math.floor((cur / tot) * length)
-    return "▰" * f + "▱" * (length - f)
 
-def dl_text(cur: int, tot: int, speed: float, elapsed: float, fname: str, action="dl") -> str:
-    pct  = (cur / tot * 100) if tot > 0 else 0
-    eta  = (tot - cur) / speed if speed > 0 else 0
-    icon = "⬇️" if action == "dl" else "⬆️"
-    name = (fname[:25] + "…") if len(fname) > 25 else fname
+def dl_text(current: int, total: int, speed: float, eta: int, title: str = "") -> str:
+    pct = (current / total * 100) if total else 0
+    filled = int(pct / 5)
+    bar = "█" * filled + "░" * (20 - filled)
+    size_done = _fmt(current)
+    size_tot  = _fmt(total)
+    spd       = _fmt(speed) + "/s"
+    eta_str   = _eta(eta)
+    header = f"»»──── ⬇️ Downloading ────««\n"
+    if title:
+        header += f"▸ {title[:50]}\n"
     return (
-        f"╔══════════════════════════════╗\n"
-        f"║  {icon}  {'Downloading' if action=='dl' else 'Uploading':<26}║\n"
-        f"╠══════════════════════════════╣\n"
-        f"║  📄 {name:<26}║\n"
-        f"║  {bar(cur,tot):<14}  {pct:5.1f}%        ║\n"
-        f"║  🚀 {fmt_size(int(speed))}/s  ⏱ {fmt_time(elapsed):<14}║\n"
-        f"║  📦 {fmt_size(cur)} / {fmt_size(tot):<18}║\n"
-        f"║  ⏳ ETA: {fmt_time(eta):<22}║\n"
-        f"╚══════════════════════════════╝"
+        f"{header}\n"
+        f"[{bar}] {pct:.1f}%\n"
+        f"▸ {size_done} / {size_tot}\n"
+        f"▸ Speed : {spd}\n"
+        f"▸ ETA   : {eta_str}\n"
+        f"\n⋆｡° ✮ @Universal_DownloadBot ✮ °｡⋆"
     )
 
-def done_text(fname: str, size: int, elapsed: float, speed: float) -> str:
-    name = (fname[:26] + "…") if len(fname) > 26 else fname
-    return (
-        f"»»────── ✅ DOWNLOADED ──────««\n\n"
-        f"  📄 {name}\n"
-        f"  📦 {fmt_size(size)}\n"
-        f"  ⚡ {fmt_size(int(speed))}/s\n"
-        f"  ⏱  {fmt_time(elapsed)}\n\n"
-        f"»»──────────────────────────««"
-    )
 
-def queue_text(pos: int, total: int, fname: str = "") -> str:
-    name = (fname[:26] + "…") if len(fname) > 26 else fname
-    return (
-        f"»»──────── ⏳ QUEUED ────────««\n\n"
-        f"  📄 {name}\n"
-        f"  📍 Position : #{pos} of {total}\n"
-        f"  ⌛ Please wait your turn…\n\n"
-        f"»»──────────────────────────««"
-    )
+def _fmt(b: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if b < 1024:
+            return f"{b:.1f} {unit}"
+        b /= 1024
+    return f"{b:.1f} TB"
+
+
+def _eta(secs: int) -> str:
+    if secs <= 0:
+        return "—"
+    m, s = divmod(secs, 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h}h {m}m {s}s"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
+class ProgressTracker:
+    def __init__(self):
+        self._start  = time.time()
+        self._last   = time.time()
+        self._last_b = 0
+
+    def update(self, current: int, total: int) -> tuple:
+        now   = time.time()
+        dt    = now - self._last or 0.001
+        speed = (current - self._last_b) / dt
+        eta   = int((total - current) / speed) if speed > 0 else 0
+        self._last   = now
+        self._last_b = current
+        return speed, eta

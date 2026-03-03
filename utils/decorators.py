@@ -1,71 +1,78 @@
-"""Auth decorators: owner_only, anti_ban, force_subscribe, rate_limit."""
-import functools, logging
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from config import Config
-from utils.helpers import is_owner, is_subbed, plan_badge
+import asyncio
+from functools import wraps
+from pyrogram.types import Message
 import database as db
+from utils.helpers import is_owner, is_subbed, fmt_size
+from config import (FREE_LIMIT, BASIC_LIMIT, PREMIUM_LIMIT,
+                    FSUB_LINK, MAX_SIZE, OWNER_IDS)
 
-log = logging.getLogger(__name__)
 
-def owner_only(fn):
-    @functools.wraps(fn)
-    async def wrap(client, msg: Message, *a, **kw):
-        if not is_owner(msg.from_user.id):
-            await msg.reply("🚫 **Owner only command.**", quote=True)
-            return
-        return await fn(client, msg, *a, **kw)
-    return wrap
+def guard(func):
+    """Check ban → force-sub → daily limit before running handler."""
+    @wraps(func)
+    async def wrapper(client, message: Message, *args, **kwargs):
+        uid  = message.from_user.id if message.from_user else 0
+        user = await db.get_user(uid)
 
-def guard(fn):
-    """Stacks: ban check → force-sub → daily limit."""
-    @functools.wraps(fn)
-    async def wrap(client, msg: Message, *a, **kw):
-        uid  = msg.from_user.id
-        user = await db.reset_if_new_day(uid)
-
-        # ── create user if first time ──────────────────────
+        # ── Register new user ──
         if not user:
-            user = await db.ensure_user(uid, msg.from_user.username or "", msg.from_user.first_name or "")
+            fn = (message.from_user.first_name or "") + " " + (message.from_user.last_name or "")
+            await db.upsert_user(uid, message.from_user.username or "", fn.strip())
+            user = await db.get_user(uid)
 
-        # ── ban check ──────────────────────────────────────
+        # ── Ban check ──
         if user and user.get("is_banned"):
-            await msg.reply(
-                f"🚫 **You are banned.**\n\nContact @{Config.OWNER_UNAME} for appeal.",
-                quote=True
+            await message.reply(
+                "»»──── 🚫 Banned ────««\n\n"
+                "You are banned from using this bot.\n"
+                f"Contact @{client.SUPPORT_USERNAME if hasattr(client, 'SUPPORT_USERNAME') else 'TechnicalSerena'} to appeal."
             )
             return
 
-        # ── force subscribe ────────────────────────────────
-        if not is_owner(uid) and Config.FSUB_ID:
-            if not await is_subbed(client, uid):
-                await msg.reply(
-                    "»»──── 🔔 JOIN REQUIRED ────««\n\n"
-                    "Please join our channel first,\nthen send the link again.",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("📢 Join Channel", url=Config.FSUB_LINK),
-                        InlineKeyboardButton("✅ Joined",        callback_data="check_sub"),
-                    ]]),
-                    quote=True
+        # ── Force-sub check ──
+        if FSUB_LINK and not await is_subbed(client, uid):
+            from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            await message.reply(
+                "»»──── 📢 Join Required ────««\n\n"
+                "▸ You must join our channel first!\n\n"
+                f"⋆｡° ✮ @Universal_DownloadBot ✮ °｡⋆",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📢 Join Channel", url=FSUB_LINK),
+                    InlineKeyboardButton("✅ I Joined", callback_data="check_sub"),
+                ]])
+            )
+            return
+
+        # ── Plan expiry ──
+        await db.check_plan_expiry(uid)
+        user = await db.check_and_reset_daily(uid)
+
+        # ── Daily limit ──
+        if uid not in OWNER_IDS:
+            plan  = user.get("plan", "free")
+            limit = {"basic": BASIC_LIMIT, "premium": PREMIUM_LIMIT}.get(plan, FREE_LIMIT)
+            count = user.get("daily_count", 0)
+            if count >= limit:
+                badge = {"basic": "🥉", "premium": "💎"}.get(plan, "🆓")
+                await message.reply(
+                    f"»»──── ⚠️ Daily Limit ────««\n\n"
+                    f"▸ Plan    : {badge} {plan.capitalize()}\n"
+                    f"▸ Used    : {count}/{limit}\n\n"
+                    "Limit resets at midnight UTC.\n"
+                    "Upgrade for more downloads! /plans\n\n"
+                    "⋆｡° ✮ @Universal_DownloadBot ✮ °｡⋆"
                 )
                 return
 
-        # ── daily limit ────────────────────────────────────
-        if not is_owner(uid):
-            used, lim = await db.get_limit(user)
-            if used >= lim:
-                plan = user.get("plan", "free")
-                await msg.reply(
-                    "»»──── ⚠️ Limit Reached ────««\n\n"
-                    f"📊 Used today : **{used} / {lim}**\n"
-                    f"🏷️  Your plan  : **{plan_badge(plan)}**\n\n"
-                    "Upgrade to download more!",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("💎 Get Premium",
-                                             url=f"https://t.me/{Config.OWNER_UNAME}"),
-                    ]]),
-                    quote=True
-                )
-                return
+        return await func(client, message, *args, **kwargs)
+    return wrapper
 
-        return await fn(client, msg, *a, **kw)
-    return wrap
+
+def owner_only(func):
+    @wraps(func)
+    async def wrapper(client, message: Message, *args, **kwargs):
+        if not is_owner(message.from_user.id if message.from_user else 0):
+            await message.reply("🚫 Owner only command.")
+            return
+        return await func(client, message, *args, **kwargs)
+    return wrapper
