@@ -224,7 +224,7 @@ async def _enqueue(client, urls: list, uid: int, chat_id: int,
 # ═══════════════════════════════════════════════════
 #  /audio
 # ═══════════════════════════════════════════════════
-@app.on_message(filters.command("audio") & filters.incoming)
+@app.on_message(filters.command("audio") & ~filters.outgoing)
 @guard
 async def cmd_audio(client, msg: Message):
     parts = msg.text.split(None, 1)
@@ -248,7 +248,7 @@ async def cmd_audio(client, msg: Message):
 # ═══════════════════════════════════════════════════
 #  /info
 # ═══════════════════════════════════════════════════
-@app.on_message(filters.command("info") & filters.incoming)
+@app.on_message(filters.command("info") & ~filters.outgoing)
 @guard
 async def cmd_info(client, msg: Message):
     parts = msg.text.split(None, 1)
@@ -289,7 +289,7 @@ async def cmd_info(client, msg: Message):
 # ═══════════════════════════════════════════════════
 #  Text message handler — main download trigger
 # ═══════════════════════════════════════════════════
-@app.on_message(filters.incoming & filters.text & ~filters.command(_CMDS))
+@app.on_message(~filters.outgoing & filters.text & ~filters.command(_CMDS))
 @guard
 async def handle_text(client, msg: Message):
     urls = extract_urls(msg.text or "")
@@ -307,7 +307,7 @@ async def handle_text(client, msg: Message):
 # ═══════════════════════════════════════════════════
 #  Document — .txt bulk download
 # ═══════════════════════════════════════════════════
-@app.on_message(filters.incoming & filters.document)
+@app.on_message(~filters.outgoing & filters.document)
 @guard
 async def handle_doc(client, msg: Message):
     doc = msg.document
@@ -331,12 +331,12 @@ async def handle_doc(client, msg: Message):
 # ═══════════════════════════════════════════════════
 #  /cancel  /queue
 # ═══════════════════════════════════════════════════
-@app.on_message(filters.command("cancel") & filters.incoming)
+@app.on_message(filters.command("cancel") & ~filters.outgoing)
 async def cmd_cancel(client, msg: Message):
     n = await queue.cancel_user(msg.from_user.id)
     await msg.reply(f"»»──── ❌ CANCELLED ────««\n\nCancelled **{n}** task(s).", quote=True)
 
-@app.on_message(filters.command("queue") & filters.incoming)
+@app.on_message(filters.command("queue") & ~filters.outgoing)
 async def cmd_queue(client, msg: Message):
     active = queue.user_active(msg.from_user.id)
     if not active:

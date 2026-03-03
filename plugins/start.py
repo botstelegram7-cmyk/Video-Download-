@@ -45,7 +45,7 @@ def _back_kb() -> InlineKeyboardMarkup:
 # ═══════════════════════════════════════════════════════
 #  /start
 # ═══════════════════════════════════════════════════════
-@app.on_message(filters.command("start") & filters.incoming)
+@app.on_message(filters.command("start") & ~filters.outgoing)
 async def cmd_start(client, msg: Message):
     u = msg.from_user
     log.info("/start uid=%s", u.id)
@@ -123,7 +123,7 @@ async def _send_home(target, user):
 # ═══════════════════════════════════════════════════════
 #  /help
 # ═══════════════════════════════════════════════════════
-@app.on_message(filters.command("help") & filters.incoming)
+@app.on_message(filters.command("help") & ~filters.outgoing)
 async def cmd_help(client, msg: Message):
     await _help_text(msg)
 
@@ -175,7 +175,7 @@ async def _help_text(target):
 # ═══════════════════════════════════════════════════════
 #  /ping
 # ═══════════════════════════════════════════════════════
-@app.on_message(filters.command("ping") & filters.incoming)
+@app.on_message(filters.command("ping") & ~filters.outgoing)
 async def cmd_ping(client, msg: Message):
     import time
     t   = time.time()
@@ -191,7 +191,7 @@ async def cmd_ping(client, msg: Message):
 # ═══════════════════════════════════════════════════════
 #  /status
 # ═══════════════════════════════════════════════════════
-@app.on_message(filters.command("status") & filters.incoming)
+@app.on_message(filters.command("status") & ~filters.outgoing)
 async def cmd_status(client, msg: Message):
     try:
         users = await db.total_users()
@@ -213,7 +213,7 @@ async def cmd_status(client, msg: Message):
 # ═══════════════════════════════════════════════════════
 #  /plans  /buy
 # ═══════════════════════════════════════════════════════
-@app.on_message(filters.command(["plans","buy"]) & filters.incoming)
+@app.on_message(filters.command(["plans","buy"]) & ~filters.outgoing)
 async def cmd_plans(client, msg: Message):
     await _plans_text(msg)
 
@@ -253,7 +253,7 @@ async def _plans_text(target):
 # ═══════════════════════════════════════════════════════
 #  /mystats
 # ═══════════════════════════════════════════════════════
-@app.on_message(filters.command("mystats") & filters.incoming)
+@app.on_message(filters.command("mystats") & ~filters.outgoing)
 async def cmd_mystats(client, msg: Message):
     await _stats_text(msg, msg.from_user.id)
 
@@ -297,7 +297,7 @@ async def _stats_text(target, uid: int):
 # ═══════════════════════════════════════════════════════
 #  /history
 # ═══════════════════════════════════════════════════════
-@app.on_message(filters.command("history") & filters.incoming)
+@app.on_message(filters.command("history") & ~filters.outgoing)
 async def cmd_history(client, msg: Message):
     await _history_text(msg, msg.from_user.id)
 
@@ -327,7 +327,7 @@ async def _history_text(target, uid: int):
 # ═══════════════════════════════════════════════════════
 #  /settings
 # ═══════════════════════════════════════════════════════
-@app.on_message(filters.command("settings") & filters.incoming)
+@app.on_message(filters.command("settings") & ~filters.outgoing)
 async def cmd_settings(client, msg: Message):
     await _settings_text(msg, msg.from_user.id)
 
@@ -355,7 +355,7 @@ async def _settings_text(target, uid: int):
 # ═══════════════════════════════════════════════════════
 #  /feedback
 # ═══════════════════════════════════════════════════════
-@app.on_message(filters.command("feedback") & filters.incoming)
+@app.on_message(filters.command("feedback") & ~filters.outgoing)
 async def cmd_feedback(client, msg: Message):
     u    = msg.from_user
     args = msg.text.split(None, 1)

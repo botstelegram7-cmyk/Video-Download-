@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 # ════════════════════════════════════════════
 #  /givepremium
 # ════════════════════════════════════════════
-@app.on_message(filters.command("givepremium") & filters.incoming)
+@app.on_message(filters.command("givepremium") & ~filters.outgoing)
 @owner_only
 async def cmd_giveprem(client, msg: Message):
     args = msg.command[1:]
@@ -67,7 +67,7 @@ async def cmd_giveprem(client, msg: Message):
 # ════════════════════════════════════════════
 #  /removepremium
 # ════════════════════════════════════════════
-@app.on_message(filters.command("removepremium") & filters.incoming)
+@app.on_message(filters.command("removepremium") & ~filters.outgoing)
 @owner_only
 async def cmd_remprem(client, msg: Message):
     args = msg.command[1:]
@@ -90,7 +90,7 @@ async def cmd_remprem(client, msg: Message):
 # ════════════════════════════════════════════
 #  /ban  /unban
 # ════════════════════════════════════════════
-@app.on_message(filters.command("ban") & filters.incoming)
+@app.on_message(filters.command("ban") & ~filters.outgoing)
 @owner_only
 async def cmd_ban(client, msg: Message):
     args = msg.command[1:]
@@ -108,7 +108,7 @@ async def cmd_ban(client, msg: Message):
     except: pass
     await msg.reply(f"🚫 Banned `{uid}`.", quote=True)
 
-@app.on_message(filters.command("unban") & filters.incoming)
+@app.on_message(filters.command("unban") & ~filters.outgoing)
 @owner_only
 async def cmd_unban(client, msg: Message):
     args = msg.command[1:]
@@ -127,7 +127,7 @@ async def cmd_unban(client, msg: Message):
 # ════════════════════════════════════════════
 #  /stats
 # ════════════════════════════════════════════
-@app.on_message(filters.command("stats") & filters.incoming)
+@app.on_message(filters.command("stats") & ~filters.outgoing)
 @owner_only
 async def cmd_stats(client, msg: Message):
     tu   = await db.total_users()
@@ -153,7 +153,7 @@ async def cmd_stats(client, msg: Message):
 # ════════════════════════════════════════════
 #  /users
 # ════════════════════════════════════════════
-@app.on_message(filters.command("users") & filters.incoming)
+@app.on_message(filters.command("users") & ~filters.outgoing)
 @owner_only
 async def cmd_users(client, msg: Message):
     prem = await db.premium_users()
@@ -174,7 +174,7 @@ async def cmd_users(client, msg: Message):
 # ════════════════════════════════════════════
 #  /banned
 # ════════════════════════════════════════════
-@app.on_message(filters.command("banned") & filters.incoming)
+@app.on_message(filters.command("banned") & ~filters.outgoing)
 @owner_only
 async def cmd_banned(client, msg: Message):
     ban = await db.banned_users()
@@ -189,7 +189,7 @@ async def cmd_banned(client, msg: Message):
 # ════════════════════════════════════════════
 #  /broadcast
 # ════════════════════════════════════════════
-@app.on_message(filters.command("broadcast") & filters.incoming)
+@app.on_message(filters.command("broadcast") & ~filters.outgoing)
 @owner_only
 async def cmd_broadcast(client, msg: Message):
     if len(msg.command) < 2 and not msg.reply_to_message:
@@ -215,7 +215,7 @@ async def cmd_broadcast(client, msg: Message):
 # ════════════════════════════════════════════
 #  /restart
 # ════════════════════════════════════════════
-@app.on_message(filters.command("restart") & filters.incoming)
+@app.on_message(filters.command("restart") & ~filters.outgoing)
 @owner_only
 async def cmd_restart(client, msg: Message):
     await msg.reply("»»──── 🔄 Restarting… ────««", quote=True)
