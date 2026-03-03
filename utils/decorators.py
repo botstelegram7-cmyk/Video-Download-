@@ -1,97 +1,71 @@
-"""
-╔══════════════════════════════════════════╗
-║       🔒  D E C O R A T O R S              ║
-╚══════════════════════════════════════════╝
-"""
-import logging, functools
+"""Auth decorators: owner_only, anti_ban, force_subscribe, rate_limit."""
+import functools, logging
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from config import Config
-from utils.helpers import is_owner, is_subscribed
+from utils.helpers import is_owner, is_subbed, plan_badge
 import database as db
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
-def owner_only(func):
-    @functools.wraps(func)
-    async def wrapper(client, message: Message, *args, **kwargs):
-        if not is_owner(message.from_user.id):
-            await message.reply(
-                "»»──── 🚫 Access Denied ────««\n"
-                "This command is for Owner only.",
-                quote=True
-            )
+def owner_only(fn):
+    @functools.wraps(fn)
+    async def wrap(client, msg: Message, *a, **kw):
+        if not is_owner(msg.from_user.id):
+            await msg.reply("🚫 **Owner only command.**", quote=True)
             return
-        return await func(client, message, *args, **kwargs)
-    return wrapper
+        return await fn(client, msg, *a, **kw)
+    return wrap
 
-def check_ban(func):
-    @functools.wraps(func)
-    async def wrapper(client, message: Message, *args, **kwargs):
-        uid  = message.from_user.id
-        user = await db.get_user(uid)
+def guard(fn):
+    """Stacks: ban check → force-sub → daily limit."""
+    @functools.wraps(fn)
+    async def wrap(client, msg: Message, *a, **kw):
+        uid  = msg.from_user.id
+        user = await db.reset_if_new_day(uid)
+
+        # ── create user if first time ──────────────────────
+        if not user:
+            user = await db.ensure_user(uid, msg.from_user.username or "", msg.from_user.first_name or "")
+
+        # ── ban check ──────────────────────────────────────
         if user and user.get("is_banned"):
-            await message.reply(
-                f"»»──── 🚫 You Are Banned ────««\n\n"
-                f"Contact {Config.OWNER_USERNAME} for appeal.",
+            await msg.reply(
+                f"🚫 **You are banned.**\n\nContact @{Config.OWNER_UNAME} for appeal.",
                 quote=True
             )
             return
-        return await func(client, message, *args, **kwargs)
-    return wrapper
 
-def force_subscribe(func):
-    @functools.wraps(func)
-    async def wrapper(client, message: Message, *args, **kwargs):
-        uid = message.from_user.id
-        if is_owner(uid):
-            return await func(client, message, *args, **kwargs)
-        if not await is_subscribed(client, uid):
-            btn = InlineKeyboardMarkup([[
-                InlineKeyboardButton("📢 Join Channel", url=Config.FORCE_SUB_CHANNEL),
-                InlineKeyboardButton("✅ I Joined",     callback_data="check_sub"),
-            ]])
-            await message.reply(
-                "»»──── 🔔 JOIN REQUIRED ──────««\n\n"
-                "Please join our channel first,\n"
-                "then click **✅ I Joined** to continue.",
-                reply_markup=btn, quote=True
-            )
-            return
-        return await func(client, message, *args, **kwargs)
-    return wrapper
+        # ── force subscribe ────────────────────────────────
+        if not is_owner(uid) and Config.FSUB_ID:
+            if not await is_subbed(client, uid):
+                await msg.reply(
+                    "»»──── 🔔 JOIN REQUIRED ────««\n\n"
+                    "Please join our channel first,\nthen send the link again.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("📢 Join Channel", url=Config.FSUB_LINK),
+                        InlineKeyboardButton("✅ Joined",        callback_data="check_sub"),
+                    ]]),
+                    quote=True
+                )
+                return
 
-def check_limit(func):
-    @functools.wraps(func)
-    async def wrapper(client, message: Message, *args, **kwargs):
-        uid = message.from_user.id
-        if is_owner(uid):
-            return await func(client, message, *args, **kwargs)
+        # ── daily limit ────────────────────────────────────
+        if not is_owner(uid):
+            used, lim = await db.get_limit(user)
+            if used >= lim:
+                plan = user.get("plan", "free")
+                await msg.reply(
+                    "»»──── ⚠️ Limit Reached ────««\n\n"
+                    f"📊 Used today : **{used} / {lim}**\n"
+                    f"🏷️  Your plan  : **{plan_badge(plan)}**\n\n"
+                    "Upgrade to download more!",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("💎 Get Premium",
+                                             url=f"https://t.me/{Config.OWNER_UNAME}"),
+                    ]]),
+                    quote=True
+                )
+                return
 
-        # Ensure user exists
-        user = await db.check_and_reset_daily(uid)
-        if not user:
-            await db.upsert_user(uid, message.from_user.username, message.from_user.first_name)
-            user = await db.get_user(uid)
-
-        if not user:
-            return await func(client, message, *args, **kwargs)
-
-        used, limit = await db.get_user_limit(user)
-        if used >= limit:
-            plan = user.get("plan", "free")
-            await message.reply(
-                f"»»──── ⚠️ Daily Limit Reached ────««\n\n"
-                f"📊 Downloads Used : **{used} / {limit}** today\n"
-                f"🏷️  Your Plan      : **{plan.capitalize()}**\n\n"
-                f"🌟 Upgrade for more downloads!\n"
-                f"  💎 Premium → {Config.PREMIUM_DAILY_LIMIT}/day\n"
-                f"  🥉 Basic   → {Config.BASIC_DAILY_LIMIT}/day",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("💎 Get Premium", callback_data="buy_premium"),
-                    InlineKeyboardButton("👑 Owner",       url=f"https://t.me/{Config.OWNER_USERNAME.strip('@')}"),
-                ]]),
-                quote=True
-            )
-            return
-        return await func(client, message, *args, **kwargs)
-    return wrapper
+        return await fn(client, msg, *a, **kw)
+    return wrap

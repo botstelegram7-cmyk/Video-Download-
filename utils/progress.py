@@ -1,59 +1,46 @@
-"""
-╔══════════════════════════════════════════╗
-║    📊  P R O G R E S S  B A R  U T I L     ║
-╚══════════════════════════════════════════╝
-"""
+"""Progress bar builder for download/upload messages."""
 import math
-from utils.helpers import human_size, human_time
+from utils.helpers import fmt_size, fmt_time
 
-def make_progress_bar(current: int, total: int, length: int = 15) -> str:
-    if total <= 0:
-        return "▰" * length
-    pct    = current / total
-    filled = math.floor(pct * length)
-    empty  = length - filled
-    return "▰" * filled + "▱" * empty
+def bar(cur: int, tot: int, length: int = 14) -> str:
+    if tot <= 0: return "▰" * length
+    f = math.floor((cur / tot) * length)
+    return "▰" * f + "▱" * (length - f)
 
-def build_progress_text(action: str, current: int, total: int,
-                         speed: float, elapsed: float, filename: str = "") -> str:
-    pct  = (current / total * 100) if total > 0 else 0
-    eta  = (total - current) / speed if speed > 0 else 0
-    bar  = make_progress_bar(current, total)
-    fname = (filename[:26] + "…") if len(filename) > 26 else filename
-    emoji = "⬇️" if action == "dl" else "⬆️"
-    label = "Downloading" if action == "dl" else "Uploading"
-
+def dl_text(cur: int, tot: int, speed: float, elapsed: float, fname: str, action="dl") -> str:
+    pct  = (cur / tot * 100) if tot > 0 else 0
+    eta  = (tot - cur) / speed if speed > 0 else 0
+    icon = "⬇️" if action == "dl" else "⬆️"
+    name = (fname[:25] + "…") if len(fname) > 25 else fname
     return (
         f"╔══════════════════════════════╗\n"
-        f"║  {emoji} {label:<27}║\n"
+        f"║  {icon}  {'Downloading' if action=='dl' else 'Uploading':<26}║\n"
         f"╠══════════════════════════════╣\n"
-        f"║  📄 {fname:<26}║\n"
-        f"╠══════════════════════════════╣\n"
-        f"║  {bar}  ║\n"
-        f"║  📶 {pct:>5.1f}%  |  🚀 {human_size(int(speed))}/s      ║\n"
-        f"║  📦 {human_size(current):>9} / {human_size(total):<12}║\n"
-        f"║  ⏱️  Elapsed: {human_time(elapsed):<16}║\n"
-        f"║  ⏳ ETA:     {human_time(eta):<17}║\n"
+        f"║  📄 {name:<26}║\n"
+        f"║  {bar(cur,tot):<14}  {pct:5.1f}%        ║\n"
+        f"║  🚀 {fmt_size(int(speed))}/s  ⏱ {fmt_time(elapsed):<14}║\n"
+        f"║  📦 {fmt_size(cur)} / {fmt_size(tot):<18}║\n"
+        f"║  ⏳ ETA: {fmt_time(eta):<22}║\n"
         f"╚══════════════════════════════╝"
     )
 
-def build_queue_text(position: int, total_in_queue: int, filename: str = "") -> str:
-    fname = (filename[:28] + "…") if len(filename) > 28 else filename
+def done_text(fname: str, size: int, elapsed: float, speed: float) -> str:
+    name = (fname[:26] + "…") if len(fname) > 26 else fname
     return (
-        f"»»──────── ⏳ QUEUED ────────««\n"
-        f"  📄 {fname}\n"
-        f"  📍 Position : #{position} / {total_in_queue}\n"
-        f"  ⌛ Please wait your turn…\n"
+        f"»»────── ✅ DOWNLOADED ──────««\n\n"
+        f"  📄 {name}\n"
+        f"  📦 {fmt_size(size)}\n"
+        f"  ⚡ {fmt_size(int(speed))}/s\n"
+        f"  ⏱  {fmt_time(elapsed)}\n\n"
         f"»»──────────────────────────««"
     )
 
-def build_done_text(filename: str, file_size: int, elapsed: float, avg_speed: float) -> str:
-    fname = (filename[:28] + "…") if len(filename) > 28 else filename
+def queue_text(pos: int, total: int, fname: str = "") -> str:
+    name = (fname[:26] + "…") if len(fname) > 26 else fname
     return (
-        f"»»──────── ✅ DONE ──────────««\n"
-        f"  📄 {fname}\n"
-        f"  📦 Size   : {human_size(file_size)}\n"
-        f"  ⚡ Speed  : {human_size(int(avg_speed))}/s\n"
-        f"  ⏱  Time   : {human_time(elapsed)}\n"
+        f"»»──────── ⏳ QUEUED ────────««\n\n"
+        f"  📄 {name}\n"
+        f"  📍 Position : #{pos} of {total}\n"
+        f"  ⌛ Please wait your turn…\n\n"
         f"»»──────────────────────────««"
     )
