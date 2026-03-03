@@ -1,24 +1,28 @@
-# ╔═══════════════════════════════════════╗
-# ║   SERENA DOWNLOADER BOT - Requirements ║
-# ╚═══════════════════════════════════════╝
+# ╔══════════════════════════════════════════════════╗
+# ║   SERENA DOWNLOADER BOT — requirements.txt       ║
+# ╚══════════════════════════════════════════════════╝
 
-# ── Telegram ──────────────────────────
+# ── Telegram ──────────────────────────────────────
 pyrogram==2.0.106
 TgCrypto
 
-# ── Downloader ────────────────────────
+# ── Colored buttons (optional) ───────────────────
+pyroblock
+
+# ── Downloader ────────────────────────────────────
 yt-dlp
 aiohttp
+gdown
 
-# ── Database ──────────────────────────
+# ── Database ──────────────────────────────────────
 aiosqlite
 
-# ── Media Processing ──────────────────
+# ── Media Processing ──────────────────────────────
 Pillow
-PyMuPDF   # for PDF thumbnails (optional)
+PyMuPDF
 
-# ── Web Server ────────────────────────
+# ── Web Server ────────────────────────────────────
 flask
 
-# ── Utilities ─────────────────────────
+# ── Utilities ─────────────────────────────────────
 python-dotenv

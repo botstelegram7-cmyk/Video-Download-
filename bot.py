@@ -10,10 +10,11 @@ import asyncio, logging, datetime, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# ── Flask BEFORE asyncio.run() ────────────────────────────────────────────────
+# ── Flask keep-alive thread (must be before asyncio.run) ─────────────────────
 from web.app import start_flask_thread
 start_flask_thread()
 
+# ── Core imports ──────────────────────────────────────────────────────────────
 from pyrogram import idle
 from config import Config
 from client import app
@@ -21,6 +22,7 @@ import database as db
 from queue_manager import queue_manager
 
 # ── Register handlers by importing plugins ────────────────────────────────────
+# IMPORTANT: import BEFORE app.start() so decorators bind correctly
 import plugins.start     # noqa
 import plugins.download  # noqa
 import plugins.admin     # noqa
@@ -53,54 +55,63 @@ Config.TERABOX_COOKIES_PATH   = _resolve_cookie("TERABOX_COOKIES",   Config.TERA
 # ── Main ──────────────────────────────────────────────────────────────────────
 async def main():
     if not Config.validate():
-        logger.error("Invalid config — check BOT_TOKEN / API_ID / API_HASH in .env")
+        logger.error("❌ Invalid config — check BOT_TOKEN / API_ID / API_HASH")
         sys.exit(1)
 
+    # Init DB
     try:
         await db.init_db()
-        logger.info("Database ready: %s", Config.DATABASE_PATH)
+        print("[DB] ✅ Database ready:", Config.DATABASE_PATH, flush=True)
     except Exception as e:
-        logger.error("Database init failed: %s", e)
+        print("[DB] ❌ Database init failed:", e, flush=True)
         sys.exit(1)
 
+    # Start queue
     await queue_manager.start()
-    logger.info("Queue manager ready")
+    print("[QUEUE] ✅ Queue manager ready", flush=True)
 
-    async with app:
-        me = await app.get_me()
-        Config.BOT_USERNAME = me.username
-        logger.info("Logged in as @%s", me.username)
+    # ── KEY FIX: Use explicit start/stop instead of `async with app:` ─────────
+    # `async with app:` can miss decorator-registered handlers in Pyrogram 2.x
+    await app.start()
+    me = await app.get_me()
+    Config.BOT_USERNAME = me.username
+    print(f"[BOT] ✅ Logged in as @{me.username}", flush=True)
 
-        if Config.LOG_CHANNEL:
-            try:
-                await app.send_message(
-                    Config.LOG_CHANNEL,
-                    "»»──── 🤖 Bot Started ────««\n\n"
-                    "@" + me.username + " is **online**!\n"
-                    "🕐 " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                )
-            except Exception as e:
-                logger.warning("Log channel notify failed: %s", e)
+    # Notify log channel
+    if Config.LOG_CHANNEL:
+        try:
+            await app.send_message(
+                Config.LOG_CHANNEL,
+                "»»──── 🤖 Bot Started ────««\n\n"
+                "@" + me.username + " is **online**!\n"
+                "🕐 " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+        except Exception as e:
+            logger.warning("Log channel notify failed: %s", e)
 
-        print("""
+    print("""
 ╔══════════════════════════════════════════╗
 ║   ✅  BOT IS NOW ONLINE & RUNNING!       ║
 ║   ⋆｡° ✮  SERENA DOWNLOADER  ✮ °｡⋆      ║
 ║   Owner   : @Xioqui_Xan                 ║
 ║   Support : @TechnicalSerena            ║
 ╚══════════════════════════════════════════╝
-        """)
+    """, flush=True)
 
-        await idle()
+    await idle()
 
+    # Graceful shutdown
+    await app.stop()
     await queue_manager.stop()
-    logger.info("Bot stopped.")
+    print("[BOT] Stopped.", flush=True)
+
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Stopped by user.")
+        print("[BOT] Stopped by user.", flush=True)
     except Exception as e:
+        print(f"[BOT] FATAL: {e}", flush=True)
         logger.critical("Fatal: %s", e, exc_info=True)
         sys.exit(1)
