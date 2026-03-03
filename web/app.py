@@ -1,34 +1,21 @@
-"""
-Keep-alive Flask web server for Render Web Service.
-Render requires a process that binds to $PORT.
-"""
-import threading, logging
-from flask import Flask, jsonify
-from config import Config
+import os
+from flask import Flask
 
-log = logging.getLogger(__name__)
-_app = Flask(__name__)
+# Read PORT directly from env - NO Config class import needed
+PORT = int(os.getenv("PORT", "10000"))
 
-@_app.route("/")
+flask_app = Flask(__name__)
+
+
+@flask_app.route("/")
 def index():
-    return jsonify({
-        "status":  "online",
-        "bot":     Config.BOT_NAME,
-        "owner":   f"@{Config.OWNER_UNAME}",
-        "support": f"@{Config.SUPPORT_UNAME}",
-    })
+    return "<h2>Serena Downloader Bot is running!</h2><p>Visit @Universal_DownloadBot on Telegram.</p>"
 
-@_app.route("/health")
+
+@flask_app.route("/health")
 def health():
-    return jsonify({"status": "ok"}), 200
+    return "OK", 200
 
-def start():
-    def _run():
-        try:
-            _app.run(host=Config.HOST, port=Config.PORT,
-                     debug=False, use_reloader=False)
-        except Exception as e:
-            log.error("Flask: %s", e)
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    log.info("Web server on port %s", Config.PORT)
+
+def run():
+    flask_app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False)
