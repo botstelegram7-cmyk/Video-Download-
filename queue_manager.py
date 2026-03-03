@@ -1,86 +1,52 @@
-"""Async task queue with per-user tracking and cancellation."""
-import asyncio, uuid, time, logging
-from dataclasses import dataclass, field
-from typing import Optional
-from config import Config
+import asyncio
+from collections import defaultdict
 
-log = logging.getLogger(__name__)
+_queues: dict = defaultdict(asyncio.Queue)
+_semaphore = asyncio.Semaphore(5)
 
-@dataclass
-class Task:
-    task_id:  str
-    user_id:  int
-    url:      str
-    chat_id:  int
-    msg_id:   int
-    status:   str = "queued"       # queued | running | done | failed | cancelled
-    created:  float = field(default_factory=time.time)
-    future:   Optional[asyncio.Future] = field(default=None, compare=False, repr=False)
 
-class Queue:
-    def __init__(self):
-        self._q       = asyncio.Queue(maxsize=Config.QUEUE_SIZE)
-        self._tasks   = {}          # task_id → Task
-        self._by_user = {}          # user_id → [task_id]
-        self._running = False
-        self._lock    = asyncio.Lock()
+class QueueItem:
+    def __init__(self, user_id: int, url: str, msg, extra: dict = None):
+        self.user_id   = user_id
+        self.url       = url
+        self.msg       = msg
+        self.extra     = extra or {}
+        self.cancelled = False
 
-    async def start(self):
-        self._running = True
-        asyncio.ensure_future(self._worker())
-        log.info("Queue worker started")
 
-    async def stop(self):
-        self._running = False
+async def enqueue(item: QueueItem) -> int:
+    q = _queues[item.user_id]
+    await q.put(item)
+    return q.qsize()
 
-    async def add(self, user_id, url, chat_id, msg_id) -> Task:
-        tid    = str(uuid.uuid4())[:8]
-        future = asyncio.get_event_loop().create_future()
-        task   = Task(tid, user_id, url, chat_id, msg_id, future=future)
-        async with self._lock:
-            self._tasks[tid] = task
-            self._by_user.setdefault(user_id, []).append(tid)
-        await self._q.put(tid)
-        return task
 
-    def position(self, tid: str) -> int:
-        try: return list(self._q._queue).index(tid) + 1
-        except ValueError: return 0
+async def cancel_user_queue(user_id: int) -> int:
+    q = _queues[user_id]
+    cancelled = 0
+    while not q.empty():
+        try:
+            item = q.get_nowait()
+            item.cancelled = True
+            cancelled += 1
+        except asyncio.QueueEmpty:
+            break
+    return cancelled
 
-    def size(self) -> int:
-        return self._q.qsize()
 
-    def user_active(self, uid: int) -> list[Task]:
-        return [self._tasks[t] for t in self._by_user.get(uid, [])
-                if t in self._tasks and self._tasks[t].status in ("queued","running")]
+def get_queue_size(user_id: int) -> int:
+    return _queues[user_id].qsize()
 
-    async def cancel_user(self, uid: int) -> int:
-        n = 0
-        for tid in self._by_user.get(uid, []):
-            t = self._tasks.get(tid)
-            if t and t.status == "queued":
-                t.status = "cancelled"
-                if t.future and not t.future.done(): t.future.cancel()
-                n += 1
-        return n
 
-    async def _worker(self):
-        while self._running:
+async def process_queue(user_id: int, processor):
+    q = _queues[user_id]
+    while not q.empty():
+        item = await q.get()
+        if item.cancelled:
+            q.task_done()
+            continue
+        async with _semaphore:
             try:
-                tid = await asyncio.wait_for(self._q.get(), timeout=1.0)
-            except asyncio.TimeoutError: continue
-            except Exception as e: log.error("Queue err: %s", e); continue
-
-            t = self._tasks.get(tid)
-            if not t or t.status == "cancelled":
-                self._q.task_done(); continue
-
-            t.status = "running"
-            try:
-                if t.future and not t.future.done():
-                    t.future.set_result("go")
-            except Exception: pass
-            finally:
-                self._q.task_done()
-
-queue = Queue()
+                await processor(item)
+            except Exception as e:
+                print(f"[QUEUE] Error for {user_id}: {e}")
+        q.task_done()

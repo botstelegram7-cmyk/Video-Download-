@@ -1,19 +1,11 @@
-"""
-Shared Pyrogram Client.
-
-in_memory=True  — no .session file on disk.
-                  Required for Render / stateless deployments.
-                  Prevents stale-session silent message drops.
-"""
 from pyrogram import Client
-from config import Config
+from config import API_ID, API_HASH, BOT_TOKEN
 
 app = Client(
-    name            = "SerenaBot",
-    api_id          = Config.API_ID,
-    api_hash        = Config.API_HASH,
-    bot_token       = Config.BOT_TOKEN,
-    in_memory       = True,          # ← THE FIX
-    workers         = 10,
-    sleep_threshold = 60,
+    name="SerenaBot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    in_memory=True,        # CRITICAL for Render.com — no .session file
+    sleep_threshold=60,
 )

@@ -1,25 +1,10 @@
-# ╔══════════════════════════════════════════════════╗
-# ║   SERENA DOWNLOADER BOT — requirements.txt       ║
-# ╚══════════════════════════════════════════════════╝
-
-# Telegram
 pyrogram==2.0.106
 TgCrypto
-
-# Downloader
 yt-dlp
 aiohttp
 gdown
-
-# Database
 aiosqlite
-
-# Media
 Pillow
 PyMuPDF
-
-# Web server (Render keep-alive)
 flask
-
-# Env
 python-dotenv
