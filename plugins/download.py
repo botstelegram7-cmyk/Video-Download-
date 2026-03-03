@@ -12,15 +12,14 @@ from config import Config
 import database as db
 from utils.helpers import (
     extract_urls, url_type, user_dir, cleanup,
-    fmt_size, format_datetime, is_owner
+    fmt_size, fmt_dt, is_owner,
 )
-from utils.helpers import fmt_dt
 from utils.progress import dl_text, done_text, queue_text
 from utils.decorators import guard
 from downloader.core import download, fetch_info
 from downloader.media import (
     video_thumb, pdf_thumb, prep_thumb,
-    remux, add_meta, video_info, build_caption
+    remux, add_meta, video_info, build_caption,
 )
 from queue_manager import queue
 
@@ -30,7 +29,6 @@ VIDEO = {"mp4","mkv","avi","mov","webm","flv","ts","wmv","m4v"}
 AUDIO = {"mp3","aac","flac","wav","ogg","m4a","opus"}
 IMAGE = {"jpg","jpeg","png","gif","webp","bmp"}
 
-# Commands excluded from text handler
 _CMDS = [
     "start","help","ping","status","plans","buy","settings",
     "mystats","history","feedback","audio","info","queue","cancel",
@@ -38,21 +36,19 @@ _CMDS = [
     "stats","users","banned","restart",
 ]
 
-# ────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────
 def _pcb(client, chat_id, msg_id, fname, action="dl"):
-    """Build async progress callback (rate-limited)."""
     last = [0.0]
     async def cb(cur, tot, spd, ela):
         now = time.time()
         if now - last[0] < Config.PROGRESS_IV: return
         last[0] = now
         try:
-            await client.edit_message_text(chat_id, msg_id,
-                dl_text(cur, tot, spd, ela, fname, action))
+            await client.edit_message_text(
+                chat_id, msg_id, dl_text(cur, tot, spd, ela, fname, action))
         except Exception: pass
     return cb
 
-# ────────────────────────────────────────────────────
 def _upload_btns() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         Btn("👑 Owner",   url=f"https://t.me/{Config.OWNER_UNAME}"),
@@ -61,11 +57,11 @@ def _upload_btns() -> InlineKeyboardMarkup:
     ]])
 
 async def _upload(client, chat_id, fpath, info, caption, thumb):
-    """Send file in correct Telegram type based on its actual extension."""
+    """Send file in the correct Telegram type based on actual extension."""
     ext  = (info.get("ext") or os.path.splitext(fpath)[1].lstrip(".")).lower()
     kb   = _upload_btns()
     name = os.path.basename(fpath)
-    log.info("Upload: ext=%s size=%s", ext, fmt_size(os.path.getsize(fpath)))
+    log.info("Upload ext=%s size=%s thumb=%s", ext, fmt_size(os.path.getsize(fpath)), bool(thumb))
 
     if ext in VIDEO:
         vi = await video_info(fpath)
@@ -85,20 +81,19 @@ async def _upload(client, chat_id, fpath, info, caption, thumb):
         await client.send_photo(chat_id, photo=fpath, caption=caption, reply_markup=kb)
     elif ext == "pdf":
         th = thumb or await pdf_thumb(fpath, os.path.dirname(fpath))
-        await client.send_document(chat_id, document=fpath, caption=caption,
-                                   thumb=th, reply_markup=kb)
+        await client.send_document(
+            chat_id, document=fpath, caption=caption, thumb=th, reply_markup=kb)
     else:
-        # zip, rar, apk, exe, iso, dmg, docx, etc. — send as document, keep filename
+        # zip, rar, apk, exe, iso, dmg, docx … — send as document, keep filename
         await client.send_document(
             chat_id, document=fpath, caption=caption,
             thumb=thumb, reply_markup=kb, file_name=name,
         )
 
-# ────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────
 async def _process(client, url: str, uid: int, chat_id: int,
                    reply_id: int, audio=False):
-    """Full download → process → upload pipeline."""
-    pm = await client.send_message(
+    pm  = await client.send_message(
         chat_id,
         "»»──── 🔍 Analyzing… ────««\n\n`" + url[:80] + "`",
         reply_to_message_id=reply_id,
@@ -123,13 +118,13 @@ async def _process(client, url: str, uid: int, chat_id: int,
         # Size guard
         if size > Config.MAX_SIZE:
             await client.edit_message_text(chat_id, pid,
-                "»»──── ❌ File Too Large ────««\n\n"
+                f"»»──── ❌ File Too Large ────««\n\n"
                 f"Size : **{fmt_size(size)}**\n"
                 f"Max  : **{fmt_size(Config.MAX_SIZE)}**"
             )
             cleanup(fpath); return
 
-        # Video: remux then metadata
+        # ── Video: remux for Telegram streaming + metadata ──
         if ext in VIDEO:
             await client.edit_message_text(chat_id, pid,
                 "»»── 🔧 Processing video… ──««\n_(Making Telegram-streamable…)_")
@@ -140,13 +135,18 @@ async def _process(client, url: str, uid: int, chat_id: int,
 
         outdir = os.path.dirname(fpath)
 
-        # Thumbnail
+        # ── Thumbnail (video → ffmpeg frame, pdf → PyMuPDF first page) ──
         thumb = info.get("thumbnail")
-        if not thumb and ext in VIDEO: thumb = await video_thumb(fpath, outdir)
-        elif not thumb and ext == "pdf": thumb = await pdf_thumb(fpath, outdir)
-        if thumb: thumb = await prep_thumb(thumb)
+        if not thumb and ext in VIDEO:
+            thumb = await video_thumb(fpath, outdir)
+        elif not thumb and ext == "pdf":
+            thumb = await pdf_thumb(fpath, outdir)
+        if thumb and os.path.exists(thumb):
+            thumb = await prep_thumb(thumb)
+        else:
+            thumb = None
 
-        # Caption
+        # ── Caption ──────────────────────────────────────────
         user  = await db.get_user(uid)
         uname = (user or {}).get("username","")
         me    = await client.get_me()
@@ -168,7 +168,6 @@ async def _process(client, url: str, uid: int, chat_id: int,
             done_text(os.path.basename(fpath), size, elapsed,
                       size / elapsed if elapsed > 0 else 0))
 
-        # Log to channel
         if Config.LOG_CHANNEL:
             try: await client.forward_messages(Config.LOG_CHANNEL, chat_id, [pid])
             except Exception: pass
@@ -194,7 +193,7 @@ async def _process(client, url: str, uid: int, chat_id: int,
         except: pass
         await db.log_dl(uid, url, "", 0, "failed")
 
-# ────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────
 async def _enqueue(client, urls: list, uid: int, chat_id: int,
                    reply_id: int, audio=False):
     for url in urls:
@@ -222,9 +221,9 @@ async def _enqueue(client, urls: list, uid: int, chat_id: int,
         await _process(client, url, uid, chat_id, reply_id, audio=audio)
         await asyncio.sleep(0.3)
 
-# ════════════════════════════════════════════
+# ═══════════════════════════════════════════════════
 #  /audio
-# ════════════════════════════════════════════
+# ═══════════════════════════════════════════════════
 @app.on_message(filters.command("audio") & filters.incoming)
 @guard
 async def cmd_audio(client, msg: Message):
@@ -237,22 +236,18 @@ async def cmd_audio(client, msg: Message):
             "YouTube, TikTok, Instagram and more.\n\n"
             "»»──────────────────────────««",
             quote=True
-        )
-        return
+        ); return
     urls = extract_urls(parts[1])
     if not urls:
         await msg.reply("No valid URL found.", quote=True); return
     await msg.reply(
-        f"»»── 🎵 Audio queued ({len(urls)} URL) ──««\n\nProcessing…",
-        quote=True
-    )
+        f"»»── 🎵 Audio queued ({len(urls)}) ──««\n\nProcessing…", quote=True)
     asyncio.ensure_future(
-        _enqueue(client, urls, msg.from_user.id, msg.chat.id, msg.id, audio=True)
-    )
+        _enqueue(client, urls, msg.from_user.id, msg.chat.id, msg.id, audio=True))
 
-# ════════════════════════════════════════════
+# ═══════════════════════════════════════════════════
 #  /info
-# ════════════════════════════════════════════
+# ═══════════════════════════════════════════════════
 @app.on_message(filters.command("info") & filters.incoming)
 @guard
 async def cmd_info(client, msg: Message):
@@ -261,13 +256,10 @@ async def cmd_info(client, msg: Message):
         await msg.reply(
             "»»──── ℹ️ URL INFO ────««\n\nUsage: `/info <URL>`\n\n"
             "Gets info **without downloading**.\n\n»»──────────────────────────««",
-            quote=True
-        )
-        return
+            quote=True); return
     urls = extract_urls(parts[1])
     if not urls:
         await msg.reply("No valid URL found.", quote=True); return
-
     url  = urls[0]
     wait = await msg.reply("»»──── 🔍 Fetching info… ────««", quote=True)
     try:
@@ -281,7 +273,7 @@ async def cmd_info(client, msg: Message):
             if not s: return "N/A"
             m,s = divmod(int(s),60); h,m = divmod(m,60)
             return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
-        txt = (
+        await wait.edit_text(
             "»»──────── ℹ️ URL INFO ────────««\n\n"
             f"📄 **Title**    : {title}\n"
             f"👤 **Uploader** : {upl}\n"
@@ -290,14 +282,13 @@ async def cmd_info(client, msg: Message):
             f"👁️  **Views**    : {views:,}\n\n"
             "»»──────────────────────────────««"
         )
-        await wait.edit_text(txt)
     except Exception as e:
         await wait.edit_text(
             "»»──── ❌ Info Failed ────««\n\nError: `" + str(e)[:200] + "`")
 
-# ════════════════════════════════════════════
-#  Text message — main download trigger
-# ════════════════════════════════════════════
+# ═══════════════════════════════════════════════════
+#  Text message handler — main download trigger
+# ═══════════════════════════════════════════════════
 @app.on_message(filters.incoming & filters.text & ~filters.command(_CMDS))
 @guard
 async def handle_text(client, msg: Message):
@@ -307,20 +298,15 @@ async def handle_text(client, msg: Message):
             "»»──── ℹ️ No URL Found ────««\n\n"
             "Send a **valid URL** or **.txt** file with links.\n"
             "/help for instructions.",
-            quote=True
-        )
-        return
+            quote=True); return
     await msg.reply(
-        f"»»── 📋 {len(urls)} URL(s) queued ──««\n\nProcessing…",
-        quote=True
-    )
+        f"»»── 📋 {len(urls)} URL(s) queued ──««\n\nProcessing…", quote=True)
     asyncio.ensure_future(
-        _enqueue(client, urls, msg.from_user.id, msg.chat.id, msg.id)
-    )
+        _enqueue(client, urls, msg.from_user.id, msg.chat.id, msg.id))
 
-# ════════════════════════════════════════════
+# ═══════════════════════════════════════════════════
 #  Document — .txt bulk download
-# ════════════════════════════════════════════
+# ═══════════════════════════════════════════════════
 @app.on_message(filters.incoming & filters.document)
 @guard
 async def handle_doc(client, msg: Message):
@@ -328,10 +314,7 @@ async def handle_doc(client, msg: Message):
     if not (doc and doc.file_name and doc.file_name.lower().endswith(".txt")):
         await msg.reply(
             "»»──── ℹ️ Unsupported File ────««\n\n"
-            "Only **.txt** files with links are supported.",
-            quote=True
-        ); return
-
+            "Only **.txt** files with links are supported.", quote=True); return
     sm  = await msg.reply("»»── 📄 Reading links file… ──««", quote=True)
     out = user_dir(msg.from_user.id)
     txt = os.path.join(out, "links.txt")
@@ -340,16 +323,14 @@ async def handle_doc(client, msg: Message):
         content = f.read()
     urls = extract_urls(content)
     if not urls:
-        await sm.edit_text("»»──── ❌ No URLs Found ────««\n\nNo valid URLs in file.")
-        return
+        await sm.edit_text("»»──── ❌ No URLs Found ────««\n\nNo valid URLs in file."); return
     await sm.edit_text(f"»»── ✅ Found **{len(urls)} URLs** ──««\nQueuing all downloads…")
     asyncio.ensure_future(
-        _enqueue(client, urls, msg.from_user.id, msg.chat.id, msg.id)
-    )
+        _enqueue(client, urls, msg.from_user.id, msg.chat.id, msg.id))
 
-# ════════════════════════════════════════════
+# ═══════════════════════════════════════════════════
 #  /cancel  /queue
-# ════════════════════════════════════════════
+# ═══════════════════════════════════════════════════
 @app.on_message(filters.command("cancel") & filters.incoming)
 async def cmd_cancel(client, msg: Message):
     n = await queue.cancel_user(msg.from_user.id)
@@ -359,8 +340,7 @@ async def cmd_cancel(client, msg: Message):
 async def cmd_queue(client, msg: Message):
     active = queue.user_active(msg.from_user.id)
     if not active:
-        await msg.reply("»»──── 📋 QUEUE ────««\n\nNo active downloads.", quote=True)
-        return
+        await msg.reply("»»──── 📋 QUEUE ────««\n\nNo active downloads.", quote=True); return
     lines = ["»»────── 📋 YOUR QUEUE ──────««\n"]
     for i, t in enumerate(active, 1):
         lines.append(f"  {i}. [{t.status.upper()}] `{t.url[:40]}`")
