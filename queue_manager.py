@@ -1,12 +1,11 @@
 """
 ╔══════════════════════════════════════════╗
-║   📋  Q U E U E  M A N A G E R             ║
+║   📋  Q U E U E  M A N A G E R            ║
 ╚══════════════════════════════════════════╝
-Async queue with per-user tracking and cancellation.
 """
 import asyncio, logging, time, uuid
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Optional
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -19,46 +18,34 @@ class DownloadTask:
     message_id: int
     chat_id:    int
     filename:   str = ""
-    status:     str = "queued"   # queued | downloading | done | failed | cancelled
+    status:     str = "queued"
     created_at: float = field(default_factory=time.time)
     future:     Optional[asyncio.Future] = field(default=None, compare=False, repr=False)
 
 class QueueManager:
     def __init__(self):
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=Config.MAX_QUEUE_SIZE)
-        self._tasks: dict[str, DownloadTask] = {}       # task_id → task
-        self._user_tasks: dict[int, list[str]] = {}     # user_id → [task_ids]
-        self._running: set[str] = set()
+        self._queue        = asyncio.Queue(maxsize=Config.MAX_QUEUE_SIZE)
+        self._tasks        = {}
+        self._user_tasks   = {}
         self._worker_running = False
-        self._lock = asyncio.Lock()
+        self._lock         = asyncio.Lock()
 
     async def start(self):
         self._worker_running = True
         asyncio.ensure_future(self._worker())
-        logger.info("✅ Queue worker started")
+        logger.info("Queue worker started")
 
     async def stop(self):
         self._worker_running = False
 
-    async def add_task(
-        self,
-        user_id: int,
-        url: str,
-        message_id: int,
-        chat_id: int,
-        filename: str = "",
-    ) -> DownloadTask:
+    async def add_task(self, user_id, url, message_id, chat_id, filename=""):
         task_id = str(uuid.uuid4())[:8]
-        loop = asyncio.get_event_loop()
-        future = loop.create_future()
-        task = DownloadTask(
-            task_id=task_id,
-            user_id=user_id,
-            url=url,
-            message_id=message_id,
-            chat_id=chat_id,
-            filename=filename,
-            future=future,
+        loop    = asyncio.get_event_loop()
+        future  = loop.create_future()
+        task    = DownloadTask(
+            task_id=task_id, user_id=user_id, url=url,
+            message_id=message_id, chat_id=chat_id,
+            filename=filename, future=future,
         )
         async with self._lock:
             self._tasks[task_id] = task
@@ -66,22 +53,21 @@ class QueueManager:
         await self._queue.put(task_id)
         return task
 
-    def get_position(self, task_id: str) -> int:
+    def get_position(self, task_id):
         items = list(self._queue._queue)
         try:
             return items.index(task_id) + 1
         except ValueError:
             return 0
 
-    def queue_size(self) -> int:
+    def queue_size(self):
         return self._queue.qsize()
 
-    def get_task(self, task_id: str) -> DownloadTask | None:
+    def get_task(self, task_id):
         return self._tasks.get(task_id)
 
-    async def cancel_user_tasks(self, user_id: int) -> int:
-        """Cancel all pending tasks for a user. Returns count."""
-        ids = self._user_tasks.get(user_id, [])
+    async def cancel_user_tasks(self, user_id):
+        ids   = self._user_tasks.get(user_id, [])
         count = 0
         for tid in ids:
             task = self._tasks.get(tid)
@@ -92,16 +78,7 @@ class QueueManager:
                 count += 1
         return count
 
-    async def cancel_task(self, task_id: str) -> bool:
-        task = self._tasks.get(task_id)
-        if task and task.status in ("queued", "downloading"):
-            task.status = "cancelled"
-            if task.future and not task.future.done():
-                task.future.cancel()
-            return True
-        return False
-
-    def get_user_active(self, user_id: int) -> list[DownloadTask]:
+    def get_user_active(self, user_id):
         ids = self._user_tasks.get(user_id, [])
         return [
             self._tasks[tid]
@@ -110,14 +87,13 @@ class QueueManager:
         ]
 
     async def _worker(self):
-        """Continuously process queue."""
         while self._worker_running:
             try:
                 task_id = await asyncio.wait_for(self._queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
-                logger.error(f"Queue worker error: {e}")
+                logger.error("Queue worker error: %s", e)
                 continue
 
             task = self._tasks.get(task_id)
@@ -126,16 +102,12 @@ class QueueManager:
                 continue
 
             task.status = "downloading"
-            self._running.add(task_id)
             try:
                 if task.future and not task.future.done():
                     task.future.set_result("start")
             except Exception:
                 pass
             finally:
-                self._running.discard(task_id)
                 self._queue.task_done()
-            # Actual download is handled in handler via future.
 
-# Global instance
 queue_manager = QueueManager()

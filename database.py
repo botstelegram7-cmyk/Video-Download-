@@ -1,25 +1,22 @@
 """
 ╔══════════════════════════════════════════╗
-║       💾  D A T A B A S E  M A N A G E R     ║
+║       💾  D A T A B A S E  M A N A G E R    ║
 ╚══════════════════════════════════════════╝
 """
 import aiosqlite
-import asyncio
 import logging
 from datetime import datetime, timedelta
 from config import Config
 
 logger = logging.getLogger(__name__)
-
 DB_PATH = Config.DATABASE_PATH
 
-# ──────────── Schema ────────────
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     user_id     INTEGER PRIMARY KEY,
     username    TEXT,
     full_name   TEXT,
-    plan        TEXT DEFAULT 'free',
+    plan        TEXT    DEFAULT 'free',
     plan_expiry TEXT,
     daily_count INTEGER DEFAULT 0,
     last_reset  TEXT,
@@ -28,18 +25,20 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS downloads (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     INTEGER,
-    url         TEXT,
-    file_name   TEXT,
-    file_size   INTEGER,
-    status      TEXT,
-    created_at  TEXT
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER,
+    url        TEXT,
+    file_name  TEXT,
+    file_size  INTEGER DEFAULT 0,
+    status     TEXT,
+    created_at TEXT
 );
 
-CREATE TABLE IF NOT EXISTS bot_stats (
-    key   TEXT PRIMARY KEY,
-    value TEXT
+CREATE TABLE IF NOT EXISTS feedback (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER,
+    message    TEXT,
+    created_at TEXT
 );
 """
 
@@ -50,7 +49,7 @@ async def init_db():
     logger.info("✅ Database initialized")
 
 # ──────────── User CRUD ────────────
-async def get_user(user_id: int) -> dict | None:
+async def get_user(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM users WHERE user_id=?", (user_id,)) as cur:
@@ -64,12 +63,12 @@ async def upsert_user(user_id: int, username: str, full_name: str):
             INSERT INTO users (user_id, username, full_name, joined_at, last_reset)
             VALUES (?,?,?,?,?)
             ON CONFLICT(user_id) DO UPDATE SET
-                username=excluded.username,
-                full_name=excluded.full_name
+                username  = excluded.username,
+                full_name = excluded.full_name
         """, (user_id, username or "", full_name or "", now, now))
         await db.commit()
 
-async def get_or_create_user(user_id: int, username: str, full_name: str) -> dict:
+async def get_or_create_user(user_id: int, username: str, full_name: str):
     await upsert_user(user_id, username, full_name)
     return await get_user(user_id)
 
@@ -101,12 +100,11 @@ async def unban_user(user_id: int):
         await db.commit()
 
 # ──────────── Plan / Limit ────────────
-async def check_and_reset_daily(user_id: int) -> dict:
-    """Reset daily count if new day."""
+async def check_and_reset_daily(user_id: int):
     user = await get_user(user_id)
     if not user:
         return None
-    today = datetime.now().date().isoformat()
+    today      = datetime.now().date().isoformat()
     last_reset = (user.get("last_reset") or "")[:10]
     if last_reset != today:
         async with aiosqlite.connect(DB_PATH) as db:
@@ -126,16 +124,20 @@ async def increment_daily(user_id: int):
         )
         await db.commit()
 
-async def get_user_limit(user: dict) -> tuple[int, int]:
-    """Returns (used, limit)."""
-    uid = user["user_id"]
-    # check plan expiry
+async def get_user_limit(user: dict):
+    uid  = user["user_id"]
     plan = user.get("plan", "free")
+
+    # Auto-expire plans
     expiry = user.get("plan_expiry")
     if expiry and plan != "free":
-        if datetime.now() > datetime.fromisoformat(expiry):
-            await remove_plan(uid)
-            plan = "free"
+        try:
+            if datetime.now() > datetime.fromisoformat(expiry):
+                await remove_plan(uid)
+                plan = "free"
+        except:
+            pass
+
     if uid in Config.OWNER_IDS:
         limit = Config.OWNER_DAILY_LIMIT
     elif plan == "premium":
@@ -143,7 +145,8 @@ async def get_user_limit(user: dict) -> tuple[int, int]:
     elif plan == "basic":
         limit = Config.BASIC_DAILY_LIMIT
     else:
-        limit = Config.BASIC_DAILY_LIMIT
+        limit = Config.FREE_DAILY_LIMIT
+
     return user.get("daily_count", 0), limit
 
 # ──────────── Downloads Log ────────────
@@ -152,6 +155,25 @@ async def log_download(user_id: int, url: str, file_name: str, file_size: int, s
         await db.execute(
             "INSERT INTO downloads (user_id,url,file_name,file_size,status,created_at) VALUES (?,?,?,?,?,?)",
             (user_id, url, file_name, file_size, status, datetime.now().isoformat())
+        )
+        await db.commit()
+
+async def get_user_downloads(user_id: int, limit: int = 10):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM downloads WHERE user_id=? AND status='done' ORDER BY created_at DESC LIMIT ?",
+            (user_id, limit)
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+# ──────────── Feedback ────────────
+async def save_feedback(user_id: int, message: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO feedback (user_id, message, created_at) VALUES (?,?,?)",
+            (user_id, message, datetime.now().isoformat())
         )
         await db.commit()
 
@@ -168,15 +190,22 @@ async def get_total_downloads() -> int:
             row = await cur.fetchone()
             return row[0] if row else 0
 
-async def get_all_user_ids() -> list[int]:
+async def get_all_user_ids():
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT user_id FROM users") as cur:
             rows = await cur.fetchall()
             return [r[0] for r in rows]
 
-async def get_premium_users() -> list[dict]:
+async def get_premium_users():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM users WHERE plan IN ('basic','premium')") as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+async def get_banned_users():
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM users WHERE is_banned=1") as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
