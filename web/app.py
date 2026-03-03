@@ -1,35 +1,34 @@
 """
-╔══════════════════════════════════════════╗
-║   🌐  F L A S K  W E B  S E R V E R      ║
-╚══════════════════════════════════════════╝
-Keep-alive web server for Render/Railway deployments.
+Keep-alive Flask web server for Render Web Service.
+Render requires a process that binds to $PORT.
 """
 import threading, logging
 from flask import Flask, jsonify
 from config import Config
 
-logger  = logging.getLogger(__name__)
-web_app = Flask(__name__)
+log = logging.getLogger(__name__)
+_app = Flask(__name__)
 
-@web_app.route("/")
+@_app.route("/")
 def index():
     return jsonify({
         "status":  "online",
         "bot":     Config.BOT_NAME,
-        "owner":   Config.OWNER_USERNAME,
-        "support": Config.OWNER_USERNAME2,
+        "owner":   f"@{Config.OWNER_UNAME}",
+        "support": f"@{Config.SUPPORT_UNAME}",
     })
 
-@web_app.route("/health")
+@_app.route("/health")
 def health():
     return jsonify({"status": "ok"}), 200
 
-def start_flask_thread():
-    def run():
+def start():
+    def _run():
         try:
-            web_app.run(host=Config.HOST, port=Config.PORT, debug=False, use_reloader=False)
+            _app.run(host=Config.HOST, port=Config.PORT,
+                     debug=False, use_reloader=False)
         except Exception as e:
-            logger.error("Flask error: %s", e)
-    t = threading.Thread(target=run, daemon=True)
+            log.error("Flask: %s", e)
+    t = threading.Thread(target=_run, daemon=True)
     t.start()
-    logger.info("Flask web server started on port %s", Config.PORT)
+    log.info("Web server on port %s", Config.PORT)
