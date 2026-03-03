@@ -3,21 +3,17 @@
 ║   ⋆｡° ✮   SERENA DOWNLOADER BOT   ✮ °｡⋆                ║
 ║   Owner   : @Xioqui_Xan                                 ║
 ║   Support : @TechnicalSerena                            ║
-║   Bot     : @Universal_DownloadBot                      ║
 ╚══════════════════════════════════════════════════════════╝
-
-Render-ready · Docker-compatible · Pyrogram 2.x
 """
 import asyncio, sys, os, logging, datetime
 
-# Add bot root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# ── 1. Web server first (Render needs PORT bound immediately) ─────────────────
+# ── 1. Web server first (Render needs PORT bound fast) ────────────────────────
 from web.app import start as start_web
 start_web()
 
-# ── 2. Validate config ────────────────────────────────────────────────────────
+# ── 2. Config & validation ────────────────────────────────────────────────────
 from config import Config
 try:
     Config.validate()
@@ -25,87 +21,116 @@ except EnvironmentError as e:
     print(f"[FATAL] {e}", flush=True)
     sys.exit(1)
 
-# ── 3. Import shared client + plugins (registers @app.on_message handlers) ───
-from client import app
-import plugins.start     # noqa — registers all start/help/plans handlers
-import plugins.download  # noqa — registers download handlers
-import plugins.admin     # noqa — registers admin handlers
+# ══════════════════════════════════════════════════════
+#  COOKIE RESOLVER
+#  Render env vars can contain raw Netscape cookie text.
+#  We detect this and write to /tmp so yt-dlp can read it.
+# ══════════════════════════════════════════════════════
+def _write_cookie(env_var: str, default_path: str) -> str:
+    """
+    Priority:
+      1. If env var contains raw Netscape text  → write /tmp/<name>.txt
+      2. If default_path file exists on disk    → use it
+      3. Otherwise                              → return "" (no cookies)
+    """
+    raw = os.environ.get(env_var, "").strip()
 
-# ── 4. Other imports ──────────────────────────────────────────────────────────
+    if raw:
+        # Detect Netscape format by header line OR presence of tab chars (field separator)
+        is_netscape = (
+            raw.startswith("# Netscape") or
+            raw.startswith("# HTTP Cookie") or
+            "\t" in raw
+        )
+        if is_netscape:
+            dest = f"/tmp/cookie_{env_var.lower()}.txt"
+            os.makedirs(os.path.dirname(dest) if os.path.dirname(dest) else "/tmp", exist_ok=True)
+            with open(dest, "w", encoding="utf-8") as f:
+                # Ensure header line exists (some exports omit it)
+                if not raw.startswith("#"):
+                    f.write("# Netscape HTTP Cookie File\n")
+                f.write(raw)
+                if not raw.endswith("\n"):
+                    f.write("\n")
+            print(f"[COOKIES] {env_var} → wrote {dest} ({len(raw)} chars)", flush=True)
+            return dest
+        else:
+            # Treat as file path
+            if os.path.exists(raw):
+                print(f"[COOKIES] {env_var} → file path {raw}", flush=True)
+                return raw
+
+    # Fallback to default path
+    if default_path and os.path.exists(default_path):
+        print(f"[COOKIES] {env_var} → default {default_path}", flush=True)
+        return default_path
+
+    print(f"[COOKIES] {env_var} → none", flush=True)
+    return ""
+
+# Resolve all cookies before any downloader import
+Config.YT_COOKIE = _write_cookie("YT_COOKIES",        Config.YT_COOKIE)
+Config.IG_COOKIE = _write_cookie("INSTAGRAM_COOKIES", Config.IG_COOKIE)
+Config.TB_COOKIE = _write_cookie("TERABOX_COOKIES",   Config.TB_COOKIE)
+
+# ── 3. Import client + plugins (registers all @app.on_message handlers) ───────
+from client import app
+import plugins.start     # noqa
+import plugins.download  # noqa
+import plugins.admin     # noqa
+
 import database as db
 from queue_manager import queue
 from pyrogram import idle
 
 log = logging.getLogger(__name__)
 
-# ── Cookie resolver ───────────────────────────────────────────────────────────
-def _resolve_cookie(env_var: str, default_path: str) -> str:
-    """
-    If env var contains raw Netscape cookie text → write to /tmp and return path.
-    Otherwise return file path if it exists.
-    """
-    raw = os.environ.get(env_var, "")
-    if raw and ("\t" in raw or "# Netscape" in raw):
-        dest = f"/tmp/{env_var.lower()}.txt"
-        with open(dest, "w") as f:
-            f.write(raw.strip())
-        log.info("Cookie %s → %s", env_var, dest)
-        return dest
-    return default_path if (default_path and os.path.exists(default_path)) else ""
-
-Config.YT_COOKIE = _resolve_cookie("YT_COOKIES", Config.YT_COOKIE)
-Config.IG_COOKIE = _resolve_cookie("INSTAGRAM_COOKIES", Config.IG_COOKIE)
-Config.TB_COOKIE = _resolve_cookie("TERABOX_COOKIES",   Config.TB_COOKIE)
-
 # ── Main ──────────────────────────────────────────────────────────────────────
 async def main():
-    # Init DB
     await db.init()
-
-    # Start queue
     await queue.start()
 
-    # ── KEY FIX: explicit start/stop (not `async with`) ──────────────────────
-    # Using `async with app:` can silently drop decorator-registered handlers
-    # in Pyrogram 2.x on some environments. Explicit start is reliable.
+    # KEY: explicit start/stop — NOT `async with app:`
+    # `async with` can silently drop decorator-registered handlers in Pyrogram 2.x
     await app.start()
 
     me = await app.get_me()
     Config.BOT_USERNAME = me.username
-    log.info("✅ Bot started as @%s", me.username)
 
-    # Notify log channel
     if Config.LOG_CHANNEL:
         try:
             await app.send_message(
                 Config.LOG_CHANNEL,
                 f"»»──── 🟢 Bot Online ────««\n\n"
                 f"🤖 @{me.username}\n"
-                f"🕐 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                f"🕐 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"🍪 YT cookie : {'✅' if Config.YT_COOKIE else '❌'}\n"
+                f"🍪 TB cookie : {'✅' if Config.TB_COOKIE else '❌'}"
             )
         except Exception as e:
             log.warning("Log channel: %s", e)
 
-    print("""
+    print(f"""
 ╔══════════════════════════════════════════════════╗
 ║  ✅  BOT IS ONLINE & RUNNING                     ║
 ║  ⋆｡° ✮   SERENA DOWNLOADER BOT   ✮ °｡⋆         ║
+║  Bot     : @{me.username:<35}║
 ║  Owner   : @Xioqui_Xan                          ║
 ║  Support : @TechnicalSerena                     ║
+║  YT Cookie : {'✅ Active' if Config.YT_COOKIE else '❌ None':<33}║
+║  TB Cookie : {'✅ Active' if Config.TB_COOKIE else '❌ None':<33}║
 ╚══════════════════════════════════════════════════╝
 """, flush=True)
 
     await idle()
-
     await app.stop()
     await queue.stop()
-    log.info("Bot stopped.")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("[INFO] Stopped by user.", flush=True)
+        print("[INFO] Stopped.", flush=True)
     except Exception as e:
         print(f"[FATAL] {e}", flush=True)
         log.critical("Fatal: %s", e, exc_info=True)
