@@ -1,106 +1,78 @@
 """
-╔═══════════════════════════════════════════════════╗
-║   ⋆｡° ✮  SERENA DOWNLOADER BOT  ✮ °｡⋆           ║
-║   Owner   :  @Xioqui_Xan                         ║
-║   Support :  @TechnicalSerena                     ║
-╚═══════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════╗
+║        ⚙️  SERENA DOWNLOADER BOT — CONFIG                ║
+║   Owner   : @Xioqui_Xan    Support : @TechnicalSerena   ║
+╚══════════════════════════════════════════════════════════╝
 """
-import os
-import logging
+import os, logging
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s — %(name)s — %(levelname)s — %(message)s"
+    format="%(asctime)s | %(name)-18s | %(levelname)-8s | %(message)s",
+    handlers=[logging.StreamHandler()],
 )
-logger = logging.getLogger(__name__)
 
 class Config:
-    # ┌──────────────────────────────────────┐
-    # │       🤖  BOT CREDENTIALS            │
-    # └──────────────────────────────────────┘
-    BOT_TOKEN   = os.environ.get("BOT_TOKEN", "")
-    API_ID      = int(os.environ.get("API_ID", 0))
-    API_HASH    = os.environ.get("API_HASH", "")
 
-    # ┌──────────────────────────────────────┐
-    # │       👑  OWNER CONFIG               │
-    # └──────────────────────────────────────┘
-    OWNER_IDS       = [int(x) for x in os.environ.get("OWNER_IDS", "1598576202").split(",") if x.strip()]
-    OWNER_USERNAME  = os.environ.get("OWNER_USERNAME",  "@Xioqui_Xan")
-    OWNER_USERNAME2 = os.environ.get("OWNER_USERNAME2", "@TechnicalSerena")
+    # ── 🔑 Required Credentials ─────────────────────────────
+    BOT_TOKEN  = os.environ.get("BOT_TOKEN",  "")
+    API_ID     = int(os.environ.get("API_ID",  0))
+    API_HASH   = os.environ.get("API_HASH",   "")
 
-    # ┌──────────────────────────────────────┐
-    # │       📢  CHANNELS                   │
-    # └──────────────────────────────────────┘
-    FORCE_SUB_CHANNEL    = os.environ.get("FORCE_SUB_CHANNEL",    "https://t.me/TechnicalSerena")
-    FORCE_SUB_CHANNEL_ID = os.environ.get("FORCE_SUB_CHANNEL_ID", "")   # e.g. @mychannel or -100xxxx
-    LOG_CHANNEL          = os.environ.get("LOG_CHANNEL", "")             # optional
+    # ── 👑 Owner / Branding ─────────────────────────────────
+    OWNER_IDS   = [int(x) for x in os.environ.get("OWNER_IDS", "1598576202").split(",") if x.strip()]
+    OWNER_UNAME = os.environ.get("OWNER_USERNAME",  "Xioqui_Xan")       # no @
+    SUPPORT_UNAME = os.environ.get("SUPPORT_USERNAME", "TechnicalSerena") # no @
+    BOT_NAME    = "𝗦𝗲𝗿𝗲𝗻𝗮 𝗗𝗼𝘄𝗻𝗹𝗼𝗮𝗱𝗲𝗿 𝗕𝗼𝘁"
 
-    # ┌──────────────────────────────────────┐
-    # │       🍪  COOKIES PATHS              │
-    # └──────────────────────────────────────┘
-    YT_COOKIES_PATH        = os.environ.get("YT_COOKIES_PATH",        "/app/cookies/youtube.txt")
-    INSTAGRAM_COOKIES_PATH = os.environ.get("INSTAGRAM_COOKIES_PATH", "/app/cookies/instagram.txt")
-    TERABOX_COOKIES_PATH   = os.environ.get("TERABOX_COOKIES_PATH",   "/app/cookies/terabox.txt")
+    # ── 📢 Channel ──────────────────────────────────────────
+    FSUB_LINK   = os.environ.get("FSUB_LINK", "https://t.me/TechnicalSerena")
+    FSUB_ID     = os.environ.get("FSUB_ID",   "")   # @channel or -100xxx; empty = disabled
+    LOG_CHANNEL = os.environ.get("LOG_CHANNEL","")  # optional
 
-    # ┌──────────────────────────────────────┐
-    # │       🖼️  MEDIA / BRANDING           │
-    # └──────────────────────────────────────┘
-    START_PIC = os.environ.get("START_PIC", "")   # optional photo/gif URL
-    BOT_NAME  = "𝗦𝗲𝗿𝗲𝗻𝗮 𝗗𝗼𝘄𝗻𝗹𝗼𝗮𝗱𝗲𝗿 𝗕𝗼𝘁"
+    # ── 🖼️  Branding ─────────────────────────────────────────
+    START_PIC   = os.environ.get("START_PIC",  "")  # URL of welcome photo/gif
 
-    # ┌──────────────────────────────────────┐
-    # │       📊  PLANS & LIMITS             │
-    # └──────────────────────────────────────┘
-    FREE_DAILY_LIMIT    = int(os.environ.get("FREE_DAILY_LIMIT",    "3"))
-    BASIC_DAILY_LIMIT   = int(os.environ.get("BASIC_DAILY_LIMIT",   "10"))
-    PREMIUM_DAILY_LIMIT = int(os.environ.get("PREMIUM_DAILY_LIMIT", "50"))
-    OWNER_DAILY_LIMIT   = 999_999
+    # ── 📊 Limits ────────────────────────────────────────────
+    FREE_LIMIT    = int(os.environ.get("FREE_LIMIT",    "3"))
+    BASIC_LIMIT   = int(os.environ.get("BASIC_LIMIT",  "15"))
+    PREMIUM_LIMIT = int(os.environ.get("PREMIUM_LIMIT","50"))
+    OWNER_LIMIT   = 999_999
 
-    BASIC_PLAN_DAYS   = 30    # 1 month
-    PREMIUM_PLAN_DAYS = 365   # 1 year
+    BASIC_DAYS   = 30
+    PREMIUM_DAYS = 365
 
-    # ┌──────────────────────────────────────┐
-    # │       ⚙️  DOWNLOAD SETTINGS          │
-    # └──────────────────────────────────────┘
-    DOWNLOAD_DIR             = os.environ.get("DOWNLOAD_DIR",   "/tmp/serena_downloads")
-    MAX_FILE_SIZE            = int(os.environ.get("MAX_FILE_SIZE", str(2 * 1024 * 1024 * 1024)))  # 2 GB
-    DOWNLOAD_TIMEOUT         = int(os.environ.get("DOWNLOAD_TIMEOUT", "3600"))
-    MAX_QUEUE_SIZE           = int(os.environ.get("MAX_QUEUE_SIZE",   "100"))
-    PROGRESS_UPDATE_INTERVAL = 3   # seconds
+    # ── ⚙️  Download ─────────────────────────────────────────
+    DL_DIR      = os.environ.get("DL_DIR",   "/tmp/serena_dl")
+    MAX_SIZE    = int(os.environ.get("MAX_SIZE", str(2 * 1024**3)))   # 2 GB
+    DL_TIMEOUT  = int(os.environ.get("DL_TIMEOUT", "3600"))
+    QUEUE_SIZE  = int(os.environ.get("QUEUE_SIZE", "100"))
+    PROGRESS_IV = 3   # seconds between progress edits
 
-    # ┌──────────────────────────────────────┐
-    # │       🌐  FLASK WEB SERVER           │
-    # └──────────────────────────────────────┘
-    PORT       = int(os.environ.get("PORT", "8080"))
-    HOST       = os.environ.get("HOST", "0.0.0.0")
-    SECRET_KEY = os.environ.get("SECRET_KEY", "serena_dl_bot_2024")
+    # ── 💾 Database ──────────────────────────────────────────
+    DB_PATH     = os.environ.get("DB_PATH", "/tmp/serena_db/bot.db")
 
-    # ┌──────────────────────────────────────┐
-    # │       💾  DATABASE                   │
-    # └──────────────────────────────────────┘
-    DATABASE_PATH = os.environ.get("DATABASE_PATH", "/tmp/serena_data/bot.db")
+    # ── 🍪 Cookies ───────────────────────────────────────────
+    YT_COOKIE   = os.environ.get("YT_COOKIES_PATH",        "/app/cookies/youtube.txt")
+    IG_COOKIE   = os.environ.get("INSTAGRAM_COOKIES_PATH", "/app/cookies/instagram.txt")
+    TB_COOKIE   = os.environ.get("TERABOX_COOKIES_PATH",   "/app/cookies/terabox.txt")
 
-    # ┌──────────────────────────────────────┐
-    # │       🎨  AESTHETIC THEME            │
-    # └──────────────────────────────────────┘
-    DIVIDER     = "»»────────── ✦ ──────────««"
-    DIVIDER_SM  = "──────────────────────"
-    STAR_LINE   = "⋆｡° ✮ °｡⋆"
+    # ── 🌐 Web / Render ─────────────────────────────────────
+    PORT        = int(os.environ.get("PORT", "10000"))  # Render default
+    HOST        = "0.0.0.0"
 
-    BOT_USERNAME = ""  # filled at runtime
+    # ── Runtime (set by bot.py) ──────────────────────────────
+    BOT_USERNAME = ""
 
     @classmethod
     def validate(cls):
-        errors = []
-        if not cls.BOT_TOKEN: errors.append("BOT_TOKEN is missing")
-        if not cls.API_ID:    errors.append("API_ID is missing")
-        if not cls.API_HASH:  errors.append("API_HASH is missing")
-        if errors:
-            for e in errors: logger.error(f"Config Error: {e}")
-            return False
-        return True
+        missing = []
+        if not cls.BOT_TOKEN: missing.append("BOT_TOKEN")
+        if not cls.API_ID:    missing.append("API_ID")
+        if not cls.API_HASH:  missing.append("API_HASH")
+        if missing:
+            raise EnvironmentError(f"Missing required env vars: {', '.join(missing)}")
 
-# ── Create required directories ──────────────────────────────────────────────
-os.makedirs(Config.DOWNLOAD_DIR, exist_ok=True)
-os.makedirs(os.path.dirname(Config.DATABASE_PATH), exist_ok=True)
+# Create dirs
+os.makedirs(Config.DL_DIR,  exist_ok=True)
+os.makedirs(os.path.dirname(Config.DB_PATH), exist_ok=True)

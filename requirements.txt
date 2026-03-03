@@ -2,27 +2,24 @@
 # ║   SERENA DOWNLOADER BOT — requirements.txt       ║
 # ╚══════════════════════════════════════════════════╝
 
-# ── Telegram ──────────────────────────────────────
+# Telegram
 pyrogram==2.0.106
 TgCrypto
 
-# ── Colored buttons (optional) ───────────────────
-pyroblock
-
-# ── Downloader ────────────────────────────────────
+# Downloader
 yt-dlp
 aiohttp
 gdown
 
-# ── Database ──────────────────────────────────────
+# Database
 aiosqlite
 
-# ── Media Processing ──────────────────────────────
+# Media
 Pillow
 PyMuPDF
 
-# ── Web Server ────────────────────────────────────
+# Web server (Render keep-alive)
 flask
 
-# ── Utilities ─────────────────────────────────────
+# Env
 python-dotenv

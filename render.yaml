@@ -1,0 +1,42 @@
+# ╔══════════════════════════════════════════════════════╗
+# ║   render.yaml — Render Web Service config           ║
+# ║   Commit this file to your repo root               ║
+# ╚══════════════════════════════════════════════════════╝
+services:
+  - type: web
+    name: serena-downloader-bot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        sync: false       # set manually in Render dashboard
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: OWNER_IDS
+        value: "1598576202"
+      - key: OWNER_USERNAME
+        value: "Xioqui_Xan"
+      - key: SUPPORT_USERNAME
+        value: "TechnicalSerena"
+      - key: FSUB_LINK
+        value: "https://t.me/TechnicalSerena"
+      - key: FSUB_ID
+        value: ""
+      - key: LOG_CHANNEL
+        value: ""
+      - key: START_PIC
+        value: ""
+      - key: FREE_LIMIT
+        value: "3"
+      - key: BASIC_LIMIT
+        value: "15"
+      - key: PREMIUM_LIMIT
+        value: "50"
+      - key: DB_PATH
+        value: "/tmp/serena_db/bot.db"
+      - key: DL_DIR
+        value: "/tmp/serena_dl"
