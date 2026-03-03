@@ -2,23 +2,19 @@ import time
 
 
 def dl_text(current: int, total: int, speed: float, eta: int, title: str = "") -> str:
-    pct = (current / total * 100) if total else 0
+    pct    = (current / total * 100) if total else 0
     filled = int(pct / 5)
-    bar = "█" * filled + "░" * (20 - filled)
-    size_done = _fmt(current)
-    size_tot  = _fmt(total)
-    spd       = _fmt(speed) + "/s"
-    eta_str   = _eta(eta)
-    header = f"»»──── ⬇️ Downloading ────««\n"
+    bar    = "█" * filled + "░" * (20 - filled)
+    header = "»»──── ⬇️ Downloading ────««\n"
     if title:
         header += f"▸ {title[:50]}\n"
     return (
         f"{header}\n"
         f"[{bar}] {pct:.1f}%\n"
-        f"▸ {size_done} / {size_tot}\n"
-        f"▸ Speed : {spd}\n"
-        f"▸ ETA   : {eta_str}\n"
-        f"\n⋆｡° ✮ @Universal_DownloadBot ✮ °｡⋆"
+        f"▸ {_fmt(current)} / {_fmt(total)}\n"
+        f"▸ Speed : {_fmt(speed)}/s\n"
+        f"▸ ETA   : {_eta(eta)}\n\n"
+        f"⋆｡° ✮ @Universal_DownloadBot ✮ °｡⋆"
     )
 
 
@@ -44,13 +40,12 @@ def _eta(secs: int) -> str:
 
 class ProgressTracker:
     def __init__(self):
-        self._start  = time.time()
         self._last   = time.time()
         self._last_b = 0
 
-    def update(self, current: int, total: int) -> tuple:
+    def update(self, current: int, total: int):
         now   = time.time()
-        dt    = now - self._last or 0.001
+        dt    = max(now - self._last, 0.001)
         speed = (current - self._last_b) / dt
         eta   = int((total - current) / speed) if speed > 0 else 0
         self._last   = now

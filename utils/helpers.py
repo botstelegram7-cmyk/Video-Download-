@@ -1,4 +1,5 @@
-import re, os
+import re
+import os
 from datetime import datetime
 from config import FSUB_ID, OWNER_IDS
 
@@ -8,22 +9,25 @@ TT_RE     = re.compile(r"(tiktok\.com|vm\.tiktok\.com)")
 TW_RE     = re.compile(r"(twitter\.com|x\.com)")
 FB_RE     = re.compile(r"(facebook\.com|fb\.watch)")
 GD_RE     = re.compile(r"(drive\.google\.com|docs\.google\.com)")
-TB_RE     = re.compile(r"(terabox\.com|4funbox\.com|1024tera\.com|teraboxapp\.com|"
-                        r"mirrobox\.com|nephobox\.com|freeterabox\.com)")
+TB_RE     = re.compile(
+    r"(terabox\.com|4funbox\.com|1024tera\.com|teraboxapp\.com|"
+    r"mirrobox\.com|nephobox\.com|freeterabox\.com|momerybox\.com|"
+    r"tibibox\.com|boxlen\.com)"
+)
 M3U8_RE   = re.compile(r"\.m3u8")
 VIDEO_EXT = re.compile(r"\.(mp4|mkv|avi|mov|webm|flv|ts|wmv|m4v)$", re.I)
 AUDIO_EXT = re.compile(r"\.(mp3|aac|flac|wav|ogg|m4a|opus)$", re.I)
 IMAGE_EXT = re.compile(r"\.(jpg|jpeg|png|gif|webp|bmp)$", re.I)
-DOC_EXT   = re.compile(r"\.(zip|rar|apk|exe|pdf|docx|iso|7z|tar|gz)$", re.I)
+DOC_EXT   = re.compile(r"\.(zip|rar|apk|exe|pdf|docx|iso|7z|tar|gz|dmg|deb)$", re.I)
 URL_RE    = re.compile(r"https?://\S+")
 
 
-def extract_url(text):
+def extract_url(text: str):
     m = URL_RE.search(text or "")
     return m.group(0) if m else None
 
 
-def url_type(url):
+def url_type(url: str) -> str:
     if YT_RE.search(url):      return "youtube"
     if IG_RE.search(url):      return "instagram"
     if TT_RE.search(url):      return "tiktok"
